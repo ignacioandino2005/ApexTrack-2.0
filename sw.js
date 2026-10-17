@@ -1,5 +1,5 @@
 // ApexTrack — service worker: funciona sin conexión y se actualiza solo.
-const VERSION = 'apextrack-2.0.2';
+const VERSION = 'apextrack-2.0.3';
 const CORE = [
   './', './index.html', './manifest.webmanifest', './css/app.css', './fonts/archivo.woff2',
   './js/app.js', './js/more.js', './js/store.js', './js/foods.js', './js/ai.js', './js/ui.js', './js/util.js',
