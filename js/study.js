@@ -228,7 +228,7 @@ async function editEvent(ev0 = null, date = null) {
   const r = await formSheet({
     title: ev0 ? 'Editar fecha' : `Nuevo: ${TYPES[type]}`,
     fields: [
-      { key: 'date', label: 'Fecha', type: 'date', value: ev.date, full: true },
+      { key: 'date', label: 'Fecha', type: 'date', value: ev.date, full: true, max: addDays(todayISO(), 1095) },
       { key: 'title', label: 'Detalle (opcional)', type: 'text', value: ev.title || '', placeholder: 'Ej.: unidades 1 a 4', full: true },
       { key: 'grade', label: 'Nota obtenida (cuando la tengas)', type: 'number', value: ev.grade ?? '', full: true },
     ],

@@ -11,6 +11,9 @@ import { openSheet, toast, confirmDialog, pickOption, pickDate, promptText, form
 import { weekBars, weightLine, simpleLine } from './charts.js';
 import { ui, go, setDate, render, pickMoment, prettyModel, applyTheme, dayMarks, SLOT_TABS } from './app.js';
 import { studyActions, studyTick } from './study.js';
+import * as EN from './energy.js';
+import { openGoals } from './profile.js';
+import { insightsCard, openInsights, openInsight } from './insights.js';
 
 const METRICS = {
   kcal: { label: 'Kcal', unit: 'kcal', dec: 0, goal: (g) => g.kcal, val: (d) => store.dayTotals(d).kcal },
@@ -182,7 +185,7 @@ export function renderProgreso() {
       <div class="stat"><small>Días en meta de kcal</small><b>${avg ? avg.kcalHit : 0}<span style="font-size:15px"> / ${avg ? avg.days : 0}</span></b><span>en el período</span></div>
       <div class="stat"><small>Días en meta de proteína</small><b>${avg ? avg.protHit : 0}<span style="font-size:15px"> / ${avg ? avg.days : 0}</span></b><span>en el período</span></div>
     </div>`;
-  return `<h1 class="view-title">Progreso</h1>${rangeSeg}${weightHtml}${stats}${split}${momentsHtml}${topHtml}${measHtml}`;
+  return `<h1 class="view-title">Progreso</h1>${insightsCard()}${rangeSeg}${weightHtml}${stats}${split}${momentsHtml}${topHtml}${measHtml}`;
 }
 
 async function openMeasures() {
@@ -240,7 +243,8 @@ export function renderGym() {
     return `<button class="day-card" data-act="gym-session" data-id="${s.id}"><h4>${esc(s.routineName || store.routines().find((r) => r.id === s.routineId)?.name || 'Sesión')}</h4><span class="dc-k">${esc(cap(fmtDayShort(s.date)))}</span><span class="dc-sub"><span>${(s.exercises || []).length} ejercicios</span><span>${sets} series</span>${vol ? `<span>${fmt(vol)} kg de volumen</span>` : ''}</span></button>`;
   }).join('');
   return `<h1 class="view-title">Gimnasio</h1>
-    <section class="panel">
+    ${activityCard(today)}
+    <section class="panel" style="margin-top:12px">
       <div class="kv"><span>${icon('dumbbell', 18)}Esta semana</span><b>${done} / ${g.gymDays || 4} días</b></div>
       <div class="week-dots" style="margin-top:10px">${dots}</div>
     </section>
@@ -549,36 +553,7 @@ export function openSettings(section = null) {
 }
 const isoFromTs = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
-async function editProfile() {
-  const S = store.S();
-  const p = S.settings.profile; const g = S.settings.goals;
-  const r = await formSheet({
-    title: 'Perfil y metas',
-    intro: `Tus macros suman ${fmt(g.p * 4 + g.c * 4 + g.f * 9)} kcal (proteína y carbos 4 kcal/g, grasas 9 kcal/g).`,
-    fields: [
-      { key: 'name', label: 'Nombre', type: 'text', value: p.name || '', full: true },
-      { key: 'heightCm', label: 'Altura', type: 'number', suffix: 'cm', value: p.heightCm || '' },
-      { key: 'goalWeight', label: 'Peso objetivo', type: 'number', suffix: 'kg', value: p.goalWeight ? String(p.goalWeight).replace('.', ',') : '' },
-      { key: 'kcal', label: 'Calorías', type: 'number', suffix: 'kcal', value: g.kcal },
-      { key: 'p', label: 'Proteína', type: 'number', suffix: 'g', value: g.p },
-      { key: 'c', label: 'Carbohidratos', type: 'number', suffix: 'g', value: g.c },
-      { key: 'f', label: 'Grasas', type: 'number', suffix: 'g', value: g.f },
-      { key: 'sugarMax', label: 'Azúcares máx.', type: 'number', suffix: 'g', value: g.sugarMax || '' },
-      { key: 'waterMl', label: 'Agua', type: 'number', suffix: 'ml', value: g.waterMl },
-      { key: 'gymDays', label: 'Días de gym por semana', type: 'number', value: g.gymDays, full: true },
-    ],
-  });
-  if (!r) return;
-  p.name = (r.name || '').trim();
-  if (r.heightCm >= 100 && r.heightCm <= 250) p.heightCm = round0(r.heightCm);
-  p.goalWeight = r.goalWeight >= 25 && r.goalWeight <= 300 ? round1(r.goalWeight) : null;
-  for (const k of ['kcal', 'p', 'c', 'f', 'sugarMax', 'waterMl']) if (Number.isFinite(r[k]) && r[k] >= 0) g[k] = round0(r[k]);
-  if (r.gymDays >= 0 && r.gymDays <= 7) g.gymDays = round0(r.gymDays);
-  const sum = g.p * 4 + g.c * 4 + g.f * 9;
-  store.commit('metas');
-  if (Math.abs(sum - g.kcal) > g.kcal * 0.1) toast(`Ojo: tus macros suman ${fmt(sum)} kcal y la meta es ${fmt(g.kcal)}`, { ms: 6000 });
-  else toast('Metas guardadas');
-}
+function editProfile() { return openGoals(); }
 
 // ---------- IA ----------
 function openAISettings() {
@@ -593,7 +568,7 @@ function openAISettings() {
       <button class="set-row-btn" data-a="prec">${icon('bolt', 22)}<span class="grow">Precisión<small>Máxima usa un modelo más grande: tarda más y gasta más cuota</small></span><span class="val">${PREC[ai.precision] || 'Equilibrada'}</span>${icon('right', 18)}</button>
       <button class="set-row-btn" data-a="model">${icon('sparkle', 22)}<span class="grow">Modelo<small>${ai.resolvedModel ? 'En uso: ' + esc(ai.resolvedModel) : 'Se elige solo el mejor disponible'}</small></span><span class="val">${ai.model === 'auto' || !ai.model ? 'Automático' : esc(ai.model)}</span>${icon('right', 18)}</button>
       <button class="set-row-btn" data-a="diag">${icon('info', 22)}<span class="grow">Diagnóstico de la conexión<small>Prueba cada vía por separado y arma un informe para copiar (usa 4 consultas)</small></span>${icon('right', 18)}</button>
-      <button class="set-row-btn" data-a="web">${icon('globe', 22)}<span class="grow">Buscar en internet<small>Para marcas, productos y comidas nuevas. Sin internet usa tu biblioteca.</small></span><span class="switch ${ai.web !== false ? 'on' : ''}" role="switch" aria-checked="${ai.web !== false}"></span></button>
+      <button class="set-row-btn" data-a="web">${icon('globe', 22)}<span class="grow">Búsqueda de Google<small>${ai.webNote ? esc(ai.webNote) : 'Las claves gratuitas no suelen tener cupo de búsqueda. Las marcas se buscan igual en Open Food Facts.'}</small></span><span class="switch ${ai.web !== false ? 'on' : ''}" role="switch" aria-checked="${ai.web !== false}"></span></button>
     </div>
     <label class="field" style="margin-top:14px"><span>Indicaciones para la IA (opcional)</span><textarea class="input" id="ai-notes" rows="3" placeholder="Ej.: la leche que tomo es Protein de La Serenísima. Cuando digo 'un plato' de pasta son 350 g cocidos.">${esc(ai.notes || '')}</textarea></label>
     <div id="ai-status" class="status-line" ${ai.lastTest ? '' : 'hidden'}>${ai.lastTest ? esc(ai.lastTest) : ''}</div>`;
@@ -1128,3 +1103,80 @@ export async function maybeOnboard() {
   if (v) { S.settings.ui.slotTab = v; store.commit('slot'); }
   openAISettings();
 }
+
+// ===========================================================================
+// ACTIVIDAD Y GASTO ESTIMADO
+// ===========================================================================
+function activityCard(date) {
+  const en = EN.dayEnergy(date);
+  const cut = EN.isCut();
+  const bal = en.balance;
+  return `<section class="panel">
+    <div class="section-head" style="margin:0 0 4px"><h3>${icon('flame', 18)} Gasto de hoy</h3><button class="link" data-act="energy">Detalle</button></div>
+    <div class="hero-row" style="margin:4px 0 8px"><div><div class="hero-num" style="font-size:34px">${fmt(en.total)}<span style="font-size:15px;font-weight:600"> kcal</span></div><div class="hero-goal">basal ${fmt(en.base)} · actividad ${fmt(en.act)} · digestión ${fmt(en.tef)}</div></div>
+      <div class="hero-left ${cut && bal > 0 ? 'over' : ''}"><b class="${cut ? (bal > 0 ? 'bad' : 'ok') : ''}">${bal > 0 ? '+' : '−'}${fmt(Math.abs(bal))}</b><span>${bal > 0 ? 'superávit' : 'déficit'} (comiste ${fmt(en.eaten)})</span></div></div>
+    ${en.items.length ? `<div class="top-list">${en.items.map((a) => `<div class="top-row"><span>${icon(EN.ACTS[a.type]?.icon || 'bolt', 16)} ${esc(EN.describeAct(a))}</span><span>${fmt(a.kcal)} kcal <button class="link" data-act="activity-del" data-id="${a.id}" data-date="${date}" aria-label="Quitar">${icon('x', 14)}</button></span></div>`).join('')}</div>` : ''}
+    ${en.gym ? `<div class="note">Incluye ${fmt(en.gym)} kcal del gimnasio (${fmt(en.gymMin)} min).</div>` : ''}
+    <div class="row" style="gap:8px;margin-top:12px"><button class="btn small" data-act="activity-add" data-type="caminata">${icon('walk', 16)} Caminata</button><button class="btn small" data-act="activity-add">${icon('plus', 16)} Otra actividad</button></div>
+  </section>`;
+}
+
+async function addActivityFlow(date, type0 = null) {
+  const type = type0 || await pickOption({ title: 'Actividad', options: Object.entries(EN.ACTS).map(([value, a]) => ({ value, label: a.label, icon: a.icon === 'walk' ? 'walk' : a.icon })) });
+  if (!type) return;
+  const dist = ['caminata', 'caminata_rapida', 'correr'].includes(type);
+  const r = await formSheet({
+    title: EN.ACTS[type].label,
+    intro: dist ? 'Completá lo que sepas: minutos, kilómetros o pasos (con uno alcanza).' : 'Cuánto duró. Si tu reloj midió las calorías, podés ponerlas.',
+    fields: [
+      { key: 'date', label: 'Día', type: 'date', value: date, full: true },
+      { key: 'min', label: 'Minutos', type: 'number', suffix: 'min', value: '' },
+      ...(dist ? [{ key: 'km', label: 'Distancia', type: 'number', suffix: 'km', value: '' }, { key: 'steps', label: 'Pasos', type: 'number', value: '', full: true }] : []),
+      { key: 'kcal', label: 'Calorías medidas (opcional)', type: 'number', suffix: 'kcal', value: '', full: !dist },
+    ],
+  });
+  if (!r) return;
+  if (r.date > todayISO()) { toast('No se puede anotar en días futuros'); return; }
+  const a = { type, min: Number.isFinite(r.min) ? r.min : 0, km: Number.isFinite(r.km) ? r.km : 0, steps: Number.isFinite(r.steps) ? r.steps : 0 };
+  if (Number.isFinite(r.kcal) && r.kcal > 0) { a.kcal = r.kcal; a.manual = true; }
+  if (!a.min && !a.km && !a.steps && !a.manual) { toast('Poné al menos los minutos, los km o los pasos'); return; }
+  const it = EN.addActivity(r.date, a);
+  store.commit('actividad');
+  toast(`${EN.ACTS[type].label}: ${fmt(EN.actKcal(it, EN.weightOn(r.date)))} kcal`);
+}
+
+function openEnergy(date) {
+  const en = EN.dayEnergy(date);
+  const p = store.S().settings.profile;
+  const goal = EN.goalMode();
+  const missing = [!p.birthYear && 'edad', !p.sex && 'sexo', !p.heightCm && 'altura', !store.latestWeight(date) && !p.weightKg && 'peso'].filter(Boolean);
+  const cut = EN.isCut();
+  openSheet({
+    title: `Gasto estimado · ${relativeDayLabel(date).toLowerCase()}`,
+    body: `<div class="top-list">
+      <div class="top-row"><span>Metabolismo basal (${fmt(en.kg, 1)} kg)</span><span>${fmt(en.bmr)} kcal</span></div>
+      <div class="top-row"><span>Vida diaria (basal × 1,2)</span><span>${fmt(en.base)} kcal</span></div>
+      ${en.items.map((a) => `<div class="top-row"><span>${esc(EN.describeAct(a))}</span><span>+${fmt(a.kcal)} kcal</span></div>`).join('')}
+      ${en.gym ? `<div class="top-row"><span>Gimnasio (${fmt(en.gymMin)} min)</span><span>+${fmt(en.gym)} kcal</span></div>` : ''}
+      <div class="top-row"><span>Digestión (10 % de lo comido)</span><span>+${fmt(en.tef)} kcal</span></div>
+      <div class="top-row"><b>Gasto total</b><b>${fmt(en.total)} kcal</b></div>
+      <div class="top-row"><span>Comiste</span><span>${fmt(en.eaten)} kcal</span></div>
+      <div class="top-row"><b>${en.balance > 0 ? 'Superávit' : 'Déficit'}</b><b class="${cut ? (en.balance > 0 ? 'bad' : 'ok') : ''}">${fmt(Math.abs(en.balance))} kcal</b></div>
+    </div>
+    <p class="note" style="margin-top:12px">Objetivo: <b>${esc(EN.GOALS[goal].label)}</b>${p.goal ? '' : ' (deducido de tu meta de calorías)'}. Es una estimación: puede variar ±10 %. ${cut ? 'En rojo cuando comés más de lo que gastás o pasás tu meta.' : ''}</p>
+    ${missing.length ? `<div class="banner info" style="margin-top:10px">${icon('info', 20)}<div class="grow">Para que sea más preciso, completá ${missing.join(', ')} en Perfil y metas.</div></div>` : ''}`,
+    footer: `<button class="btn" data-x="goals">${icon('user', 18)} Perfil y metas</button><button class="btn primary" data-x="add">${icon('plus', 18)} Actividad</button>`,
+  }).foot.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-x]'); if (!b) return;
+    b.closest('.sheet-wrap').querySelector('[data-sheet-close]').click();
+    if (b.dataset.x === 'goals') openGoals(); else addActivityFlow(date);
+  });
+}
+
+Object.assign(moreActions, {
+  'activity-add': (el) => addActivityFlow(ui.tab === 'hoy' ? ui.date : todayISO(), el.dataset.type || null),
+  'activity-del': async (el) => { if (await confirmDialog({ title: '¿Quitar la actividad?', ok: 'Quitar', danger: true })) { EN.removeActivity(el.dataset.date, el.dataset.id); store.commit('actividad'); } },
+  'energy': () => openEnergy(ui.tab === 'hoy' ? ui.date : todayISO()),
+  'insight-run': () => openInsights(),
+  'insight-open': (el) => openInsight(el.dataset.id),
+});

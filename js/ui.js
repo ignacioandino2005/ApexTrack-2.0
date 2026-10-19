@@ -5,6 +5,8 @@ import { esc, todayISO, addMonths, monthStart, parseISO, isoDate, addDays, MESES
 // ---------- Hojas (bottom sheets) con soporte del botón atrás de Android ----------
 const stack = [];
 let ignorePop = 0;
+let deferredBack = null;
+let backCount = 0;
 let rootBack = null;
 export function setRootBack(fn) { rootBack = fn; }
 
@@ -53,7 +55,9 @@ export function openSheet({ title = '', body = '', footer = '', cls = '', full =
       s.closed = true;
       const i = stack.indexOf(s);
       if (i >= 0) stack.splice(i, 1);
-      if (!fromPop) { ignorePop++; history.back(); }
+      // Volver atrás en el historial se hace un instante después: si enseguida se abre otra hoja
+      // (elegir una opción y pasar al formulario), se reutiliza la misma entrada y no se desordena.
+      if (!fromPop) { backCount++; clearTimeout(deferredBack); deferredBack = setTimeout(() => { const n = backCount; deferredBack = null; backCount = 0; if (n > 0) { ignorePop++; history.go(-n); } }, 60); }
       wrap.classList.add('closing');
       setTimeout(() => { wrap.remove(); if (!stack.length) document.body.classList.remove('has-sheet'); }, 220);
       if (onClose) { try { onClose(result); } catch (e) { console.error(e); } }
@@ -61,7 +65,7 @@ export function openSheet({ title = '', body = '', footer = '', cls = '', full =
     },
   };
   stack.push(s);
-  history.pushState({ sheet: stack.length }, '');
+  if (backCount > 0) { backCount--; history.replaceState({ sheet: stack.length }, ''); if (!backCount) { clearTimeout(deferredBack); deferredBack = null; } } else history.pushState({ sheet: stack.length }, '');
   requestAnimationFrame(() => wrap.classList.add('open'));
   wrap.querySelector('.scrim').addEventListener('click', () => { if (dismissable) s.close(); });
   wrap.querySelector('[data-sheet-close]').addEventListener('click', () => s.close());
@@ -149,7 +153,8 @@ export function formSheet({ title = '', intro = '', fields = [], submitText = 'G
   s.body.addEventListener('click', async (e) => {
     const b = e.target.closest('.date-field');
     if (!b) return;
-    const d = await pickDate({ value: b.dataset.date });
+    const fd = fields.find((x) => x.key === b.dataset.k) || {};
+    const d = await pickDate({ value: b.dataset.date, max: fd.max || null, title: fd.label || 'Elegí un día' });
     if (d) { b.dataset.date = d; b.querySelector('span').textContent = cap(fmtDayLong(d)); }
   });
   s.foot.addEventListener('click', (e) => {

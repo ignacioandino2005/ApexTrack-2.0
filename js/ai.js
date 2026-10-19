@@ -10,9 +10,10 @@ import {
 import * as store from './store.js';
 
 const API = 'https://generativelanguage.googleapis.com';
-export const FALLBACK_MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.5-flash'];
+// Medido el 19/10/2026 con una clave gratuita: 3.5 Flash responde en 3-8 s con la misma calidad que 3.8 Flash (15-50 s).
+export const FALLBACK_MODELS = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-flash-latest'];
 const UNIT_ENUM = ['g', 'ml', 'unidad', 'porcion', 'cda', 'cdita', 'taza', 'vaso', 'feta', 'rebanada', 'rodaja', 'punado', 'plato', 'paquete', 'lata', 'pote', 'scoop', 'bocha', 'copa', 'botella', 'diente', 'hoja', 'trincha', 'chorrito', 'sobre'];
-const THINKING = { rapida: 'low', equilibrada: 'low', maxima: 'high' };
+const THINKING = { rapida: 'low', equilibrada: 'low', maxima: 'medium' };
 
 // ---------------------------------------------------------------------------
 // Instrucciones calibradas
@@ -23,10 +24,12 @@ export const SYSTEM_PROMPT = `Sos el motor de registro nutricional de ApexTrack,
 - Puede abarcar varios días y varias comidas. A cada alimento asignale su fecha (YYYY-MM-DD, usando el calendario del contexto) y su momento (nombre exacto de la lista de momentos).
 - La fecha y el momento mencionados siguen valiendo para lo que viene después, hasta que el mensaje los cambie ("ayer en la cena…, después para hoy…").
 - Si no se dice la fecha, usá la fecha por defecto. Si no se dice el momento, deducilo por el contexto o usá el momento por defecto.
+- El momento por defecto NO manda sobre el mensaje: "merendé X, después comí Y, cené Z y después de cenar comí W" = X en Merienda, Y en el momento que sigue (Media tarde o Merienda si sigue siendo la tarde; si es entre la merienda y la cena y no hay otro, usá Merienda), Z en Cena, W en Post-cena. Respetá el orden del mensaje: lo que se comió "después" de una comida nunca va en un momento anterior del día (después de merendar → Merienda o un momento posterior, jamás Media tarde ni Almuerzo). "Al mediodía" = Almuerzo, "a la noche" = Cena, "antes de dormir" o "después de cenar" = Post-cena, "antes de entrenar" = Pre-entreno, "después de entrenar" = Post-entreno.
 - Autocorrecciones: vale siempre la última versión ("80, no, 70 g" → 70 g; "poné que fue, no, en realidad no fue" → no fue).
 - Ignorá muletillas e instrucciones de forma ("poné", "agregá", "anotá").
 - "No pongas nada de desayuno" o "no desayuné" → va en skipped, sin alimentos.
 - No inventes alimentos que no se mencionaron ni los dupliques.
+- NO te saltees ninguno: cada alimento nombrado es un item aparte aunque venga en una lista o con "con" ("yogur con pasta de maní, avena, copos de maní y pasas" = 5 items: yogur, pasta de maní, avena, maní, pasas). Antes de responder, repasá el mensaje y verificá que cada alimento mencionado esté en items.
 
 2) AGUA, SUPLEMENTOS, GIMNASIO Y PESO (no son alimentos)
 - Agua: "N vasos de agua" → water con ml = N × ml por vaso del contexto; "medio litro" = 500 ml. mode "sumar", salvo que el usuario dé el total del día ("en total tomé 2 litros") → "fijar". El agua NUNCA va en items.
@@ -34,17 +37,18 @@ export const SYSTEM_PROMPT = `Sos el motor de registro nutricional de ApexTrack,
 - Gimnasio: "fui al gym", "entrené pierna" → status "fui" (detail con la rutina o el músculo si se dice); "no fui" → "no_fui"; "día de descanso" → "descanso".
 - Peso corporal ("me pesé 61,2") → weight.
 - Horas de estudio ("estudié 2 horas", "estudié media hora") → study con hours (número). No son alimentos.
+- Actividad física fuera de la rutina de gimnasio ("caminé 40 minutos", "hice 8000 pasos", "corrí 5 km", "jugué al fútbol una hora") → activity con type (caminata, caminata_rapida, correr, bici, natacion, futbol, tenis, baile, eliptico, yoga, pesas, otro) y lo que se dijo: minutes, km o steps.
 - Café, té y mate van en items aunque casi no tengan calorías; sumá azúcar o leche solo si se mencionan.
 
 3) CADA ALIMENTO
 - name: nombre claro en español, con marca, tipo y cocción cuando se sepan ("Empanadas caseras de carne con masa de hojaldre, al horno").
 - quantity + unit: como lo dijo el usuario (unidad, porcion, cda, cdita, taza, vaso, feta, rebanada, plato, paquete, lata, pote, scoop, g, ml…). Si dio gramos o ml, usá unit "g" o "ml" y quantity igual a ese número.
 - grams: peso total consumido en gramos (ml en bebidas). Si el usuario dio el peso, usá exactamente ese número. Si no, estimalo con medidas argentinas reales: cda sopera ≈ 15 g (manteca de maní ≈ 20 g, aceite ≈ 13,5 g, mayonesa ≈ 15 g), cdita ≈ 5 g, vaso ≈ 200-250 ml, taza ≈ 250 ml, huevo ≈ 50 g, bollo de pan francés ≈ 50-70 g, feta de queso ≈ 20-30 g, plato de carne ≈ 200 g. Usá primero las medidas aprendidas del usuario si existen.
-- state: "crudo" o "cocido" cuando importa (arroz, fideos, legumbres, carnes, papas); "listo" para el resto. Si el usuario no lo aclara, seguí su costumbre: pesa el arroz y los fideos en crudo; la carne de un plato terminado está cocida. Si es dudoso, decilo en assumption.
+- state: "crudo" o "cocido" cuando importa (arroz, fideos, legumbres, carnes, papas); "listo" para el resto. Si el usuario no lo aclara, seguí la costumbre indicada en el contexto; la carne de un plato terminado está cocida. Si es dudoso, decilo en assumption.
 - per100: kcal, protein, carbs (disponibles, sin fibra), fat, sugars y fiber por 100 g (o 100 ml) del alimento en el MISMO estado que grams. Tienen que ser coherentes: kcal ≈ 4·protein + 4·carbs + 9·fat + 2·fiber + 7·alcohol (en bebidas alcohólicas completá alcohol, en g por 100 ml).
 - Usá valores reales, no promedios genéricos. Prioridad:
   a) Referencia del usuario: poné "ref" con el código SOLO si es exactamente el mismo alimento, con la misma receta, marca y cocción (por ejemplo "un poco del bizcochuelo de ayer" = la referencia reciente de ese bizcochuelo). Si cambia la receta, la marca o la cocción ("bizcochuelo de chocolate" no es "bizcochuelo proteico de banana"), NO uses ref y estimá de nuevo. Aun con ref, completá per100.
-  b) Productos de marca, envasados o de cadenas (galletitas, alfajores, yogures, barritas, gaseosas, comida rápida): buscá en Google la tabla nutricional oficial, preferentemente la argentina → basis "web" y en source el producto y el sitio.
+  b) Productos de marca, envasados o de cadenas (galletitas, alfajores, yogures, barritas, gaseosas, comida rápida): usá la tabla nutricional oficial argentina que conozcas (o la de Google si tenés la herramienta de búsqueda → basis "web" y en source el sitio). Completá además "producto" con marca y nombre comercial para buscar la etiqueta ("Traviata Bagley", "Alfajor Jorgito chocolate", "Yogur Ser bebible frutilla"); null en comidas caseras o genéricas.
   c) Alimentos genéricos: tablas de composición (USDA, ARGENFOODS) → basis "tabla".
   d) Si nada alcanza → basis "estimacion".
   Si llega la foto de una etiqueta, usá esa etiqueta → basis "etiqueta".
@@ -65,16 +69,16 @@ Contexto: hoy = 2026-03-12 (jue), ayer = 2026-03-11, 1 vaso = 250 ml.
 Mensaje: "Ayer en la cena eh dos milanesas de pollo al horno con puré y dos vasos de agua, y no fui al gym. Hoy desayuno café con leche con dos de azúcar y tres tostadas con queso crema, 80 no, 60 g de queso. Tomé la creatina."
 Respuesta:
 {"transcript":"","items":[
-{"date":"2026-03-11","moment":"Cena","name":"Milanesa de pollo al horno","ref":null,"quantity":2,"unit":"unidad","grams":300,"per100":{"kcal":195,"protein":22,"carbs":12,"fat":6.5,"sugars":0.5,"fiber":0.5},"state":"cocido","basis":"tabla","confidence":"media","assumption":"Milanesas medianas de 150 g","source":null,"fraction":null,"ingredients":[]},
-{"date":"2026-03-11","moment":"Cena","name":"Puré de papas casero","ref":null,"quantity":1,"unit":"porcion","grams":200,"per100":{"kcal":100,"protein":2,"carbs":15,"fat":3.5,"sugars":1,"fiber":1.5},"state":"cocido","basis":"estimacion","confidence":"baja","assumption":"Porción de 200 g con leche y manteca","source":null,"fraction":null,"ingredients":[]},
-{"date":"2026-03-12","moment":"Desayuno","name":"Café con leche entera","ref":null,"quantity":1,"unit":"taza","grams":250,"per100":{"kcal":24,"protein":1.3,"carbs":1.9,"fat":1.2,"sugars":1.9,"fiber":0},"state":"listo","basis":"tabla","confidence":"media","assumption":"Taza de 250 ml con 100 ml de leche","source":null,"fraction":null,"ingredients":[]},
-{"date":"2026-03-12","moment":"Desayuno","name":"Azúcar","ref":null,"quantity":2,"unit":"cdita","grams":10,"per100":{"kcal":400,"protein":0,"carbs":100,"fat":0,"sugars":100,"fiber":0},"state":"listo","basis":"tabla","confidence":"alta","assumption":null,"source":null,"fraction":null,"ingredients":[]},
-{"date":"2026-03-12","moment":"Desayuno","name":"Tostadas de pan","ref":null,"quantity":3,"unit":"unidad","grams":27,"per100":{"kcal":400,"protein":11,"carbs":72,"fat":6.5,"sugars":5,"fiber":3.5},"state":"listo","basis":"tabla","confidence":"media","assumption":"Tostadas tipo Riera de 9 g","source":null,"fraction":null,"ingredients":[]},
-{"date":"2026-03-12","moment":"Desayuno","name":"Queso crema","ref":null,"quantity":60,"unit":"g","grams":60,"per100":{"kcal":240,"protein":6,"carbs":4,"fat":22,"sugars":3,"fiber":0},"state":"listo","basis":"tabla","confidence":"alta","assumption":null,"source":null,"fraction":null,"ingredients":[]}],
+{"date":"2026-03-11","moment":"Cena","name":"Milanesa de pollo al horno","ref":null,"quantity":2,"unit":"unidad","grams":300,"per100":{"kcal":195,"protein":22,"carbs":12,"fat":6.5,"sugars":0.5,"fiber":0.5},"state":"cocido","basis":"tabla","confidence":"media","assumption":"Milanesas medianas de 150 g","source":null,"producto":null,"fraction":null,"ingredients":[]},
+{"date":"2026-03-11","moment":"Cena","name":"Puré de papas casero","ref":null,"quantity":1,"unit":"porcion","grams":200,"per100":{"kcal":100,"protein":2,"carbs":15,"fat":3.5,"sugars":1,"fiber":1.5},"state":"cocido","basis":"estimacion","confidence":"baja","assumption":"Porción de 200 g con leche y manteca","source":null,"producto":null,"fraction":null,"ingredients":[]},
+{"date":"2026-03-12","moment":"Desayuno","name":"Café con leche entera","ref":null,"quantity":1,"unit":"taza","grams":250,"per100":{"kcal":24,"protein":1.3,"carbs":1.9,"fat":1.2,"sugars":1.9,"fiber":0},"state":"listo","basis":"tabla","confidence":"media","assumption":"Taza de 250 ml con 100 ml de leche","source":null,"producto":null,"fraction":null,"ingredients":[]},
+{"date":"2026-03-12","moment":"Desayuno","name":"Azúcar","ref":null,"quantity":2,"unit":"cdita","grams":10,"per100":{"kcal":400,"protein":0,"carbs":100,"fat":0,"sugars":100,"fiber":0},"state":"listo","basis":"tabla","confidence":"alta","assumption":null,"source":null,"producto":null,"fraction":null,"ingredients":[]},
+{"date":"2026-03-12","moment":"Desayuno","name":"Tostadas de pan Riera","ref":null,"quantity":3,"unit":"unidad","grams":27,"per100":{"kcal":400,"protein":11,"carbs":72,"fat":6.5,"sugars":5,"fiber":3.5},"state":"listo","basis":"tabla","confidence":"media","assumption":"Tostadas tipo Riera de 9 g","source":null,"producto":"Tostadas Riera clásicas","fraction":null,"ingredients":[]},
+{"date":"2026-03-12","moment":"Desayuno","name":"Queso crema","ref":null,"quantity":60,"unit":"g","grams":60,"per100":{"kcal":240,"protein":6,"carbs":4,"fat":22,"sugars":3,"fiber":0},"state":"listo","basis":"tabla","confidence":"alta","assumption":null,"source":null,"producto":null,"fraction":null,"ingredients":[]}],
 "water":[{"date":"2026-03-11","ml":500,"mode":"sumar"}],
 "habits":[{"date":"2026-03-12","habit":"Creatina","done":true}],
 "gym":[{"date":"2026-03-11","status":"no_fui","detail":null}],
-"weight":[],"skipped":[],"questions":[]}`;
+"weight":[],"activity":[],"skipped":[],"questions":[]}`;
 
 const NUTR_SCHEMA = {
   type: 'object',
@@ -106,6 +110,7 @@ export const RESPONSE_SCHEMA = {
           confidence: { type: 'string', enum: ['alta', 'media', 'baja'] },
           assumption: { type: ['string', 'null'] },
           source: { type: ['string', 'null'] },
+          producto: { type: ['string', 'null'], description: 'Marca y producto envasado para buscar su etiqueta; null si es casero o genérico' },
           fraction: { type: ['number', 'null'] },
           ingredients: {
             type: 'array',
@@ -123,6 +128,7 @@ export const RESPONSE_SCHEMA = {
     habits: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, habit: { type: 'string' }, done: { type: 'boolean' } }, required: ['date', 'habit', 'done'] } },
     gym: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, status: { type: 'string', enum: ['fui', 'no_fui', 'descanso'] }, detail: { type: ['string', 'null'] } }, required: ['date', 'status'] } },
     weight: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, kg: { type: 'number' } }, required: ['date', 'kg'] } },
+    activity: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, type: { type: 'string', enum: ['caminata', 'caminata_rapida', 'correr', 'bici', 'natacion', 'futbol', 'tenis', 'baile', 'eliptico', 'yoga', 'pesas', 'otro'] }, minutes: { type: ['number', 'null'] }, km: { type: ['number', 'null'] }, steps: { type: ['number', 'null'] }, detail: { type: ['string', 'null'] } }, required: ['date', 'type'] } },
     study: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, hours: { type: 'number' } }, required: ['date', 'hours'] } },
     skipped: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, moment: { type: 'string' } }, required: ['date', 'moment'] } },
     questions: { type: 'array', items: { type: 'string' } },
@@ -193,6 +199,7 @@ export function buildContext({ baseDate = null, now = new Date(), baseMoment = n
     moments: store.moments().map((m) => ({ id: m.id, name: m.name })),
     habits: store.habitsList().filter((h) => h.kind !== 'hours').map((h) => ({ id: h.id, name: h.name, aliases: h.aliases || [] })),
     glassMl: S.settings.ui.glassMl || 250,
+    rawGrains: S.settings.profile?.rawGrains !== false,
     notes: (S.settings.ai.notes || '').trim(),
     learned: store.learnedHints(),
     refs, refLines, recLines,
@@ -227,10 +234,11 @@ export function buildUserText(text, ctx, extra = {}) {
   L.push(`Ahora: ${ctx.nowText}`);
   L.push(`Calendario: ${calendarLine(ctx.today)}`);
   L.push(`Fecha por defecto (si el mensaje no indica otra): ${ctx.baseDate}${ctx.baseDate === ctx.today ? ' (hoy)' : ''}`);
-  L.push(`Momento por defecto: ${momName}`);
-  L.push(`Momentos: ${ctx.moments.map((m) => m.name).join(' | ')}`);
+  L.push(`Momento por defecto: ${momName} (es solo lo que estaba elegido en la pantalla: usalo ÚNICAMENTE para alimentos sin ninguna pista de momento; si el mensaje nombra comidas, horarios o el orden del día, mandan las palabras del mensaje)`);
+  L.push(`Momentos, en orden a lo largo del día: ${ctx.moments.map((m) => m.name).join(' → ')}. Un alimento comido "después" de otro va en el mismo momento o en uno que esté más a la derecha en esta lista, nunca más a la izquierda.`);
   L.push(`Suplementos y hábitos: ${ctx.habits.map((h) => h.name).join(' | ') || '(ninguno)'}`);
   L.push(`1 vaso de agua = ${ctx.glassMl} ml`);
+  L.push(ctx.rawGrains === false ? 'Costumbre: el arroz, los fideos y las legumbres se informan ya cocidos, salvo que diga "crudo" o "seco".' : 'Costumbre: cuando da gramos, tazas o paquetes de arroz, fideos o legumbres, los pesa EN CRUDO (secos), salvo que diga "cocido", "hervido" o "un plato de".');
   if (ctx.learned?.length) L.push(`Medidas y equivalencias aprendidas del usuario: ${ctx.learned.join('; ')}`);
   if (ctx.notes) L.push(`Notas del usuario para vos: ${ctx.notes}`);
   if (ctx.refLines?.length) {
@@ -318,17 +326,16 @@ export async function discoverModels(ai, { force = false } = {}) {
 }
 
 function modelOrder(ai) {
+  const m = ai.models || {};
+  const avail = Array.isArray(m.all) && m.all.length ? new Set(m.all) : null;
+  const ok = (x) => !avail || avail.has(x);
+  const pref = ai.precision === 'maxima' ? ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash']
+    : ai.precision === 'rapida' ? ['gemini-3.5-flash-lite', 'gemini-3.5-flash']
+      : ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash'];
   const out = [];
   if (ai.model && ai.model !== 'auto') out.push(ai.model);
-  const m = ai.models || {};
-  if (ai.precision === 'maxima') out.push(...(m.pro || []).slice(0, 1), ...(m.flash || []).slice(0, 2));
-  else if (ai.precision === 'rapida') out.push(...(m.flash || []).slice(0, 1), ...(m.lite || []).slice(0, 1));
-  else out.push(...(m.flash || []).slice(0, 2));
-  out.push(...FALLBACK_MODELS);
-  const list = [...new Set(out)].filter((x) => !isExhausted(ai, x)).slice(0, 4);
-  // si se agota el cupo diario de los Flash, Flash-Lite tiene cupo propio
-  for (const l of (m.lite || []).slice(0, 1)) if (!list.includes(l) && !isExhausted(ai, l)) list.push(l);
-  return list;
+  out.push(...pref.filter(ok), ...(m.flash || []).slice(0, 2), ...(m.lite || []).slice(0, 1), ...FALLBACK_MODELS.filter(ok));
+  return [...new Set(out)].filter((x) => !isExhausted(ai, x)).slice(0, 4);
 }
 
 function interactionsBody({ model, system, parts, schema, web, thinking }) {
@@ -403,12 +410,13 @@ export function parseModelJSON(text) {
 const RATE_WIN = 60000;
 const RATE_MAX = 4;
 const STAMPS_KEY = 'apextrack_ai_stamps';
-function loadStamps() { try { return JSON.parse(localStorage.getItem(STAMPS_KEY) || '[]').filter((t) => Date.now() - t < RATE_WIN); } catch { return []; } }
-function saveStamps(a) { try { localStorage.setItem(STAMPS_KEY, JSON.stringify(a)); } catch { /* opcional */ } }
-async function waitSlot(onStatus) {
+function loadStamps(model = '') { try { return JSON.parse(localStorage.getItem(STAMPS_KEY + model) || '[]').filter((t) => Date.now() - t < RATE_WIN); } catch { return []; } }
+function saveStamps(a, model = '') { try { localStorage.setItem(STAMPS_KEY + model, JSON.stringify(a)); } catch { /* opcional */ } }
+/** Cada modelo tiene su propio límite por minuto: se cuenta por separado. */
+async function waitSlot(onStatus, model = '') {
   for (;;) {
-    const st = loadStamps();
-    if (st.length < RATE_MAX) { st.push(Date.now()); saveStamps(st); return; }
+    const st = loadStamps(model);
+    if (st.length < RATE_MAX) { st.push(Date.now()); saveStamps(st, model); return; }
     const wait = RATE_WIN - (Date.now() - st[0]) + 500;
     onStatus(`Esperando ${Math.ceil(wait / 1000)} s (límite gratuito por minuto)…`);
     await sleep(Math.min(wait, 1000));
@@ -475,7 +483,7 @@ async function callGeminiNow({ ai, system, parts, web = true, onStatus = () => {
     for (let vi = 0; vi < variants.length && budget > 0; vi++) {
       const v = variants[vi];
       onStatus(status);
-      await waitSlot(onStatus);
+      await waitSlot(onStatus, model);
       onStatus(status);
       budget--;
       const url = endpoint === 'interactions' ? `${API}/v1beta/interactions` : `${API}/v1beta/models/${encodeURIComponent(model)}:generateContent`;
@@ -483,7 +491,7 @@ async function callGeminiNow({ ai, system, parts, web = true, onStatus = () => {
         ? interactionsBody({ model, system, parts, schema: v.schema ? schema : null, web: v.web, thinking })
         : generateBody({ system, parts, schema: v.schema ? schema : null, web: v.web, thinking });
       const tr = Date.now();
-      const r = await httpJSON(url, { method: 'POST', key: ai.key, body, auth, timeout: v.web ? 75000 : 50000 });
+      const r = await httpJSON(url, { method: 'POST', key: ai.key, body, auth, timeout: v.web ? 60000 : 40000 });
       const msg = errMessage(r);
       log.push({ model, endpoint, web: v.web, schema: v.schema, status: r.status, s: Math.round((Date.now() - tr) / 1000), msg: r.ok ? 'ok' : String(msg).slice(0, 160) });
       if (r.ok) {
@@ -516,7 +524,7 @@ async function callGeminiNow({ ai, system, parts, web = true, onStatus = () => {
         // 1) la búsqueda web tiene su propio límite: seguir sin búsqueda en vez de esperar
         if (v.web) {
           const nw = variants.findIndex((x) => !x.web);
-          if (nw > vi) { vi = nw - 1; budget++; ai.webPauseUntil = Date.now() + 10 * 60000; status = 'Gemini limitó la búsqueda web: analizo sin búsqueda…'; continue; }
+          if (nw > vi) { vi = nw - 1; budget++; ai.webPauseUntil = Date.now() + 6 * 3600000; ai.webNote = 'Tu clave gratuita no tiene cupo para la búsqueda de Google: uso tablas propias y Open Food Facts.'; status = 'Analizando sin búsqueda de Google…'; continue; }
         }
         // 2) cada modelo tiene su propio límite por minuto: probar otro antes de esperar
         if (!otherModelTried && mi < models.length - 1) { otherModelTried = true; budget++; status = 'Límite por minuto de este modelo: pruebo con otro…'; lastErr = new AIError('cuota', 'Gemini está limitando las consultas por minuto.', msg); break; }
@@ -524,9 +532,9 @@ async function callGeminiNow({ ai, system, parts, web = true, onStatus = () => {
         if (minuteWaits < 1) {
           minuteWaits++;
           const wait = Math.min(65, Math.max(10, Math.ceil(q.retry) || 30));
-          saveStamps(Array(RATE_MAX).fill(Date.now())); // ocupar la ventana
+          saveStamps(Array(RATE_MAX).fill(Date.now()), model); // ocupar la ventana
           for (let k = wait; k > 0; k--) { onStatus(`Límite por minuto de Gemini: reintento en ${k} s…`); await sleep(1000); }
-          saveStamps([]);
+          saveStamps([], model);
           budget++; vi--; continue;
         }
         lastErr = new AIError('cuota', `Gemini rechazó la consulta por límite (${String(msg).slice(0, 120)}). Esperá unos minutos o calculalo sin IA.`, msg);
@@ -552,6 +560,7 @@ async function callGeminiNow({ ai, system, parts, web = true, onStatus = () => {
           const nw = variants.findIndex((x) => !x.web);
           if (nw > vi) { vi = nw - 1; status = 'La búsqueda tardó demasiado: analizo sin búsqueda web…'; continue; }
         }
+        if (s >= 500) { status = 'El modelo está saturado: pruebo con otro…'; break; }
         status = 'Falló la conexión: reintento…';
         continue;
       }
@@ -578,11 +587,11 @@ export async function diagnose(ai, onStep = () => {}) {
   add(true, 'Clave', `${ai.key.slice(0, 4)}… (${ai.key.length} caracteres) · envío por ${ai.auth || 'header'}`);
   let t = Date.now();
   const lm = await httpJSON(`${API}/v1beta/models?pageSize=1000`, { key: ai.key, timeout: 20000, auth: ai.auth || 'header' });
-  let model = 'gemini-3.8-flash';
+  let model = 'gemini-3.5-flash';
   if (lm.ok && Array.isArray(lm.json?.models)) {
     const rk = rankModels(lm.json.models.map((m) => String(m.name || '').replace(/^models\//, '')));
     ai.models = rk; ai.modelsAt = Date.now();
-    model = (ai.model && ai.model !== 'auto') ? ai.model : (rk.flash[0] || model);
+    model = modelOrder(ai)[0] || rk.flash[0] || model;
     add(true, 'Lista de modelos', `${lm.json.models.length} modelos en ${Date.now() - t} ms · Flash: ${rk.flash.slice(0, 3).join(', ') || '—'} · Lite: ${rk.lite.slice(0, 2).join(', ') || '—'} · Pro: ${rk.pro.slice(0, 2).join(', ') || '—'}`);
   } else add(false, 'Lista de modelos', `HTTP ${lm.status} ${lm.error || ''} ${errMessage(lm).slice(0, 200)}`);
   const exh = Object.entries(ai.exhausted || {}).filter(([, d]) => d === quotaDay()).map(([m]) => m);
@@ -597,7 +606,7 @@ export async function diagnose(ai, onStep = () => {}) {
   ];
   for (const [name, ep, web, schema] of steps) {
     onStep(lines.slice(), name);
-    await waitSlot(() => {});
+    await waitSlot(() => {}, model);
     t = Date.now();
     const thinking = THINKING[ai.precision] || 'low';
     const body = ep === 'interactions' ? interactionsBody({ model, system: 'Respondé en JSON.', parts: q, schema, web, thinking }) : generateBody({ system: 'Respondé en JSON.', parts: q, schema, web, thinking });
@@ -702,8 +711,21 @@ export function normalizeDraft(raw0, ctx, meta = {}) {
     return g;
   };
 
+  // Orden del día: si el mensaje dice "después" y la IA puso un alimento en un momento anterior
+  // a lo ya comido ese día (sin que el mensaje nombre ese momento), se pasa al momento previo.
+  const inputN = norm(meta.input || '');
+  const MOM_WORDS = { desayuno: /desayun/, media_manana: /media manana/, almuerzo: /almuerz|almorc|mediodia/, media_tarde: /media tarde/, merienda: /merend|merienda/, pre_entreno: /pre ?entren|antes de entrenar/, post_entreno: /post ?entren|despues de entrenar/, cena: /\bcena|\bcene/, post_cena: /post ?cena|despues de cenar|antes de dormir/ };
+  const mentioned = (id) => { const re = MOM_WORDS[id]; const mo = store.momentById(id); return (re && re.test(inputN)) || (mo && inputN.includes(norm(mo.name))); };
+  const lastByDate = {};
+  const seqFix = /\b(despues|luego|mas tarde)\b/.test(inputN);
+
   const extraWater = []; const extraHabits = [];
   for (const r of Array.isArray(raw?.items) ? raw.items : []) {
+    if (seqFix && r && r.moment) {
+      const d0 = fixDate(r.date); const m0 = fixMoment(r.moment); const prev = lastByDate[d0];
+      if (prev && store.momentIndex(m0) < store.momentIndex(prev) && !mentioned(m0)) r.moment = store.momentName(prev);
+      lastByDate[d0] = fixMoment(r.moment);
+    }
     const nm = norm(r?.name || '');
     const kcal100 = num(r?.per100?.kcal);
     // El agua y los suplementos sin calorías no son comida
@@ -756,12 +778,19 @@ export function normalizeDraft(raw0, ctx, meta = {}) {
     const h = num(x.hours);
     if (h > 0 && h <= 16) study.push({ date: fixDate(x.date), hours: round1(h) });
   }
+  const ACT_TYPES = ['caminata', 'caminata_rapida', 'correr', 'bici', 'natacion', 'futbol', 'tenis', 'baile', 'eliptico', 'yoga', 'pesas', 'otro'];
+  const activity = [];
+  for (const a of Array.isArray(raw?.activity) ? raw.activity : []) {
+    const min = num(pick(a, 'minutes', 'min')); const km = num(a.km); const steps = num(pick(a, 'steps', 'pasos'));
+    if (!(min > 0) && !(km > 0) && !(steps > 0)) continue;
+    activity.push({ date: fixDate(a.date), type: ACT_TYPES.includes(a.type) ? a.type : 'otro', min: min > 0 && min <= 600 ? Math.round(min) : 0, km: km > 0 && km <= 100 ? round1(km) : 0, steps: steps > 0 && steps <= 100000 ? Math.round(steps) : 0, note: a.detail ? String(a.detail).slice(0, 60) : '' });
+  }
   const skipped = [];
   for (const s of Array.isArray(raw?.skipped) ? raw.skipped : []) skipped.push({ date: fixDate(s.date), moment: fixMoment(s.moment) });
   const questions = (Array.isArray(raw?.questions) ? raw.questions : []).map(String).filter(Boolean).slice(0, 4);
 
   return {
-    id: uid('d'), createdAt: Date.now(), groups, water, habits, gym, weight, study, skipped, questions, warnings,
+    id: uid('d'), createdAt: Date.now(), groups, water, habits, gym, weight, study, activity, skipped, questions, warnings,
     transcript: typeof raw?.transcript === 'string' ? raw.transcript : '',
     meta: { ...meta },
   };
@@ -793,6 +822,8 @@ function normalizeItem(r, ctx, warnings) {
   };
   const src = pick(r, 'source', 'fuente_detalle');
   if (src && typeof src === 'string') item.sourceText = src.slice(0, 160);
+  const prod = pick(r, 'producto', 'product');
+  if (prod && typeof prod === 'string' && prod.trim().length > 2) item._lookup = prod.trim().slice(0, 80);
 
   // 1) Composición por 100 g informada por la IA (validada)
   const p100raw = readPer100(pick(r, 'per100', 'por100', 'nutrients'));
@@ -950,11 +981,112 @@ export async function analyze(opts) {
   }
   const draft = normalizeDraft(res.raw, ctx, { engine: 'ia', model: res.model, endpoint: res.endpoint, web: res.web, ms: res.ms, sources: res.sources, tries: res.log, input: opts.text || res.raw?.transcript || '' });
   draft.raw = res.raw;
+  if (opts.lookup !== false) { try { await enrichProducts(draft, opts.onStatus); } catch (e) { console.warn('Open Food Facts', e); } }
   // las fuentes web se adjuntan a los ítems que se buscaron en la web
   if (res.sources?.length) for (const g of draft.groups) for (const it of g.items) if (it.basis === 'web') it.sources = res.sources.slice(0, 3);
+  if (!res.web) for (const g of draft.groups) for (const it of g.items) if (it.basis === 'web') it.basis = 'tabla'; // sin búsqueda real no es dato web
   store.S().aiLog.unshift({ at: Date.now(), model: res.model, endpoint: res.endpoint, ms: res.ms, web: res.web, ok: true, log: res.log });
   store.S().aiLog.length = Math.min(store.S().aiLog.length, 30);
   return draft;
+}
+
+// ---------------------------------------------------------------------------
+// Metas a partir de lo que cuenta la persona ("tengo 30 años, peso 80, quiero bajar…")
+// ---------------------------------------------------------------------------
+const PLAN_SCHEMA = {
+  type: 'object',
+  properties: {
+    sex: { type: 'string', enum: ['m', 'f'] }, age: { type: ['number', 'null'] }, heightCm: { type: ['number', 'null'] }, weightKg: { type: ['number', 'null'] },
+    goalWeightKg: { type: ['number', 'null'] },
+    goal: { type: 'string', enum: ['bajar', 'recomp', 'mantener', 'subir'] },
+    level: { type: 'string', enum: ['sedentario', 'ligero', 'moderado', 'alto'] },
+    gymDays: { type: ['number', 'null'] },
+    kcal: { type: 'number' }, protein: { type: 'number' }, carbs: { type: 'number' }, fat: { type: 'number' },
+    sugarMax: { type: 'number' }, waterMl: { type: 'number' },
+    explanation: { type: 'string' }, missing: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['goal', 'level', 'kcal', 'protein', 'carbs', 'fat', 'explanation'],
+};
+const PLAN_PROMPT = `Sos nutricionista deportivo. Con lo que cuenta la persona (español de Argentina), deducí sus datos y armá metas diarias realistas y seguras.
+- Calculá el gasto con Mifflin-St Jeor × nivel de actividad (sedentario 1,2 · ligero 1,375 · moderado 1,55 · alto 1,725).
+- Bajar de peso: déficit de 15-25 % (nunca menos de 1.200 kcal en mujeres ni 1.500 en hombres). Recomposición: déficit 5-10 %. Subir: superávit 8-15 %. Mantener: igual al gasto.
+- Proteína 1,6-2,2 g por kg (más alta si baja de peso o entrena fuerza). Grasas 0,8-1 g por kg (al menos 20 % de las calorías). Carbohidratos: el resto. Azúcares máximo 10 % de las calorías. Agua ≈ 35 ml por kg.
+- Si falta un dato, suponé uno razonable y nombralo en missing ("edad", "altura"…). No inventes condiciones médicas.
+- explanation: 2 o 3 frases simples con el gasto estimado, el objetivo y por qué esas metas. Si la persona menciona una enfermedad, embarazo o un objetivo extremo, recomendá consultar a un profesional.
+Respondé solo el JSON.`;
+
+export async function planGoals(text, { onStatus } = {}) {
+  const ai = store.S().settings.ai;
+  const res = await callGemini({ ai, system: PLAN_PROMPT, parts: [{ text: `Hoy es ${todayISO()}.\nLo que cuenta la persona:\n"""${text}"""` }], web: false, schema: PLAN_SCHEMA, onStatus });
+  return res.raw;
+}
+
+// ---------------------------------------------------------------------------
+// Etiquetas reales de productos envasados (Open Food Facts, base abierta y gratuita)
+// ---------------------------------------------------------------------------
+const OFF_URL = 'https://world.openfoodfacts.org/cgi/search.pl';
+const offCache = new Map();
+export async function searchProduct(query, { timeout = 7000 } = {}) {
+  const q = String(query || '').trim();
+  if (q.length < 3) return null;
+  const key = norm(q);
+  if (offCache.has(key)) return offCache.get(key);
+  const url = `${OFF_URL}?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=12&fields=code,product_name,product_name_es,generic_name_es,brands,nutriments,countries_tags,quantity,serving_quantity`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeout);
+  let out = null;
+  try {
+    const r = await fetch(url, { signal: ctrl.signal });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const qt = tokens(q);
+    let best = null;
+    for (const p of j.products || []) {
+      const n = p.nutriments || {};
+      const kcal = n['energy-kcal_100g'] ?? (n.energy_100g ? n.energy_100g / 4.184 : null);
+      if (!(kcal > 0) || n.proteins_100g == null || n.carbohydrates_100g == null || n.fat_100g == null) continue;
+      const name = p.product_name_es || p.product_name || p.generic_name_es || '';
+      const brand = String(p.brands || '').split(',')[0].trim();
+      const ct = tokens(`${name} ${brand}`);
+      let sc = Math.max(scoreTokens(qt, ct), scoreTokens(ct, qt) * 0.9);
+      if (!sc) continue;
+      if ((p.countries_tags || []).includes('en:argentina')) sc += 0.15;
+      if (!best || sc > best.sc) best = { sc, p, name, brand, kcal };
+    }
+    if (best && best.sc >= 0.55) {
+      const n = best.p.nutriments;
+      out = {
+        name: best.name, brand: best.brand, code: best.p.code, score: round1(best.sc),
+        per100: { kcal: round1(best.kcal), p: round1(n.proteins_100g || 0), c: round1(n.carbohydrates_100g || 0), f: round1(n.fat_100g || 0), s: round1(n.sugars_100g || 0), fb: round1(n.fiber_100g || 0) },
+        serving: Number(best.p.serving_quantity) || null,
+        url: `https://world.openfoodfacts.org/product/${best.p.code}`,
+      };
+    }
+  } catch { out = null; } finally { clearTimeout(t); }
+  offCache.set(key, out);
+  return out;
+}
+
+/** Reemplaza los valores estimados de productos de marca por los de su etiqueta, si se encuentra. */
+export async function enrichProducts(draft, onStatus = () => {}) {
+  const items = draft.groups.flatMap((g) => g.items).filter((it) => it._lookup && it.basis !== 'referencia' && it.basis !== 'etiqueta' && it.per100);
+  if (!items.length || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
+  onStatus(items.length === 1 ? `Buscando la etiqueta de ${items[0]._lookup}…` : `Buscando ${items.length} etiquetas…`);
+  const found = await Promise.all(items.slice(0, 5).map((it) => searchProduct(it._lookup)));
+  items.slice(0, 5).forEach((it, i) => {
+    const f = found[i];
+    if (!f) return;
+    const est = it.per100?.kcal || 0;
+    // si la etiqueta encontrada no se parece en nada a lo esperado, no se usa
+    if (est > 0 && (f.per100.kcal > est * 1.8 || f.per100.kcal < est * 0.45) && f.score < 0.9) return;
+    const { per100 } = sanitizePer100({ ...f.per100 });
+    it.per100 = per100;
+    it.basis = 'etiqueta';
+    it.flags = (it.flags || []).filter((x) => x.type !== 'valores' && x.type !== 'ajuste');
+    it.sourceText = `Etiqueta: ${f.name}${f.brand ? ' (' + f.brand + ')' : ''} · Open Food Facts`;
+    it.sources = [{ t: `${f.name}${f.brand ? ' · ' + f.brand : ''}`, u: f.url }];
+  });
+  for (const it of items) delete it._lookup;
 }
 
 // ---------------------------------------------------------------------------
@@ -1015,7 +1147,7 @@ export function analyzeOffline(text, ctx = buildContext()) {
   }
   markers.sort((a, b) => a.at - b.at);
 
-  const draftRaw = { items: [], water: [], habits: [], gym: [], weight: [], study: [], skipped: [], questions: [] };
+  const draftRaw = { items: [], water: [], habits: [], gym: [], weight: [], study: [], activity: [], skipped: [], questions: [] };
   const offlineItems = [];
   const recipe = parseRecipeSentence(t, ctx);
   if (recipe) {
@@ -1054,6 +1186,16 @@ export function analyzeOffline(text, ctx = buildContext()) {
     s = s.replace(/\b(\d+)\s*ml\s+de\s+agua\b/g, (all, q) => { draftRaw.water.push({ date: ch.date, ml: Number(q), mode: totalMode ? 'fijar' : 'sumar' }); return ' '; });
     // peso corporal
     s = s.replace(/\b(?:me pese|pese|peso|pesaba|me peso)\s*(?:en ayunas\s*)?(\d{2,3}(?:[.,]\d+)?)\s*(?:kg|kilos)?(?:\s*en ayunas)?\b/g, (all, kg) => { draftRaw.weight.push({ date: ch.date, kg: num(kg) }); return ' '; });
+    // actividad: "caminé 40 minutos", "hice 8000 pasos", "corrí 5 km"
+    s = s.replace(/\b(?:(?:sali a |fui a )?(camine|caminamos|caminata de|corri|sali a correr|anduve en bici|hice bici|pedalee|nade)\s+(?:unos?\s+|como\s+)?|hice\s+(?:unos?\s+)?)(\d+(?:[.,]\d+)?)\s*(minutos?|min|horas?|hs|km|kilometros?|pasos)\b/g, (all, verb, q, u) => {
+      const v = num(q);
+      const type = !verb ? 'caminata' : /corr/.test(verb) ? 'correr' : /bici|pedal/.test(verb) ? 'bici' : /nade/.test(verb) ? 'natacion' : 'caminata';
+      const a = { date: ch.date, type, minutes: null, km: null, steps: null };
+      if (/^(minutos?|min)$/.test(u)) a.minutes = v; else if (/^(horas?|hs)$/.test(u)) a.minutes = v * 60; else if (/^(km|kilometros?)$/.test(u)) a.km = v; else a.steps = v;
+      if (!verb && !a.steps) return all;
+      draftRaw.activity.push(a);
+      return ' ';
+    });
     // horas de estudio
     s = s.replace(/\bestudi(?:e|o|ando)?\s+(?:durante\s+|por\s+)?(?:(\d+(?:[.,]\d+)?|una|dos|tres|cuatro|cinco|seis)\s+horas?(?:\s+y\s+media)?|media\s+hora)\b/g, (all, q) => {
       let h = q ? qtyVal(q) : 0.5;

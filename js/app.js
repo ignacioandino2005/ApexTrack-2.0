@@ -16,6 +16,7 @@ import { canDictate, canRecord, startDictation, startRecording } from './voice.j
 import { pickImage, scanBarcode, lookupBarcode, canScan } from './camera.js';
 import { renderDiario, renderProgreso, renderGym, openSettings, gymTimerTick, wireCharts, maybeBackupReminder, moreActions, maybeOnboard } from './more.js';
 import { renderEstudio, renderHabitos } from './study.js';
+import * as EN from './energy.js';
 
 // ---------------------------------------------------------------------------
 // Estado de la interfaz
@@ -95,6 +96,7 @@ function dayMarks(d) {
   if (!t.items) return null;
   const g = store.goals();
   const pct = g.kcal ? t.kcal / g.kcal : 0;
+  if (EN.isCut()) return pct > 1.05 ? 'bajo' : pct > 1.0 ? 'cerca' : pct >= 0.8 ? 'meta' : 'cerca'; // bajando de peso: pasarse es lo que preocupa
   return pct >= 0.95 ? 'meta' : pct >= 0.8 ? 'cerca' : 'bajo';
 }
 export { dayMarks };
@@ -135,14 +137,20 @@ function viewHoy() {
   const total = Math.max(g.kcal, t.kcal) || 1;
   const segs = entries.map((e) => ({ name: store.momentName(e.moment), kcal: store.entryMacros(e).kcal })).filter((x) => x.kcal > 0);
   const segHtml = segs.map((x) => `<span class="seg" style="flex:0 0 calc(${(x.kcal / total) * 100}% - 2px)" title="${esc(x.name)}: ${fmt(x.kcal)} kcal"></span>`).join('');
+  const en = EN.dayEnergy(d);
+  const cut = EN.isCut();
+  const excess = cut && left < 0;
+  const bal = en.balance;
+  const energyLine = `<button class="energy-line ${excess ? 'bad' : ''}" data-act="energy" aria-label="Ver gasto estimado">${icon('flame', 16)}<span>Gasto estimado <b>${fmt(en.total)}</b> kcal${en.act ? ` · actividad ${fmt(en.act)}` : ''}</span><span class="bal ${cut ? (bal > 0 ? 'bad' : 'good') : ''}">${bal > 0 ? '+' : '−'}${fmt(Math.abs(bal))}</span></button>`;
   const hero = `
-    <section class="hero" aria-label="Calorías del día">
+    <section class="hero ${excess ? 'excess' : ''}" aria-label="Calorías del día">
       <div class="hero-row">
         <div><div class="hero-num">${fmt(t.kcal)}</div><div class="hero-goal">de ${fmt(g.kcal)} kcal</div></div>
-        <div class="hero-left ${left < 0 ? 'over' : ''}"><b>${fmt(Math.abs(left))}</b><span>${left >= 0 ? 'kcal para la meta' : 'kcal sobre la meta'}</span></div>
+        <div class="hero-left ${left < 0 ? 'over' : ''}"><b>${fmt(Math.abs(left))}</b><span>${left >= 0 ? 'kcal para la meta' : (cut ? 'kcal pasado de la meta' : 'kcal sobre la meta')}</span></div>
       </div>
       <div class="stack" role="img" aria-label="${fmt(t.kcal)} de ${fmt(g.kcal)} kcal">${segHtml}<span class="goal-tick" style="left:calc(${(g.kcal / total) * 100}% - 1px)"></span></div>
       ${segs.length ? `<div class="stack-legend">${segs.map((x) => `<span>${esc(x.name)} <b>${fmt(x.kcal)}</b></span>`).join('')}</div>` : ''}
+      ${energyLine}
     </section>`;
 
   // macros
@@ -192,6 +200,7 @@ function viewHoy() {
       <div class="day-extras panel" style="margin-top:12px">
         <div class="kv"><span>${icon('dumbbell', 18)}Gimnasio</span>
           <div class="seg-ctl" style="min-width:230px">${gymStates.map(([k, l]) => `<button class="${rec.gym === k ? 'on' : ''}" data-act="gym-day" data-v="${k}">${l}</button>`).join('')}</div></div>
+        <div class="kv"><span>${icon('walk', 18)}Actividad</span><button class="weight-btn" data-act="activity-add">${en.items.length ? `${fmt(en.items.reduce((x, a) => x + a.kcal, 0))} kcal` : 'Agregar'}</button></div>
         <div class="kv"><span>${icon('scale', 18)}Peso en ayunas</span><button class="weight-btn" data-act="weight">${w && w.weight ? `${fmt(w.weight, 1)} kg` : 'Registrar'}</button></div>
         ${hours ? `<div class="kv"><span>${icon('book', 18)}${esc(hours.name)}</span><div class="study"><button class="step-btn" data-act="study" data-d="-0.5" aria-label="Menos">${icon('minus', 18)}</button><b>${fmt(rec.study || 0, 1)} h</b><button class="step-btn" data-act="study" data-d="0.5" aria-label="Más">${icon('plus', 18)}</button></div></div>` : ''}
       </div>
@@ -606,7 +615,7 @@ function dropJob(st) {
 function finishBackground(st, draft) {
   dropJob(st);
   const n = draft.groups.reduce((a, g) => a + g.items.length, 0);
-  if (!n && !draft.water.length && !draft.habits.length && !draft.gym.length && !draft.weight.length && !(draft.study || []).length) {
+  if (!n && !draft.water.length && !draft.habits.length && !draft.gym.length && !draft.weight.length && !(draft.study || []).length && !(draft.activity || []).length) {
     store.S().pending.push({ id: uid('p'), text: st.text.trim(), date: st.date, moment: st.moment, at: Date.now() });
     store.commit('pending');
     toast('La IA no encontró comidas en el mensaje: quedó guardado para revisarlo', { action: 'Abrir', onAction: runPending, ms: 7000, kind: 'error' });
@@ -659,11 +668,12 @@ function showReview(st, draft) {
       ${g.items.map((it, ii) => reviewItem(it, gi, ii)).join('')}
     </div>`;
   });
-  if (!draft.groups.length) groupsHtml = `<div class="empty" style="margin-top:6px"><strong>Sin alimentos</strong>${draft.water.length || draft.habits.length || draft.gym.length || draft.weight.length || draft.study?.length ? 'Solo se registran los datos de abajo.' : 'No encontré comidas en el mensaje.'}</div>`;
+  if (!draft.groups.length) groupsHtml = `<div class="empty" style="margin-top:6px"><strong>Sin alimentos</strong>${draft.water.length || draft.habits.length || draft.gym.length || draft.weight.length || draft.study?.length || draft.activity?.length ? 'Solo se registran los datos de abajo.' : 'No encontré comidas en el mensaje.'}</div>`;
   const extras = [];
   draft.water.forEach((w, i) => extras.push(`<span class="rv-extra">${icon('drop', 16)}${w.mode === 'fijar' ? 'Agua total' : '+'}${fmt(w.ml)} ml · ${esc(relativeDayLabel(w.date, today).toLowerCase())}<button data-r="rm" data-k="water" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   draft.habits.forEach((h, i) => extras.push(`<span class="rv-extra">${icon(h.done ? 'check' : 'x', 16)}${esc(h.name)}${h.id ? '' : ' (nuevo)'} · ${esc(relativeDayLabel(h.date, today).toLowerCase())}<button data-r="rm" data-k="habits" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   draft.gym.forEach((g, i) => extras.push(`<span class="rv-extra">${icon('dumbbell', 16)}Gym: ${g.status === 'fui' ? 'fui' : g.status === 'no_fui' ? 'no fui' : 'descanso'}${g.detail ? ` (${esc(g.detail)})` : ''} · ${esc(relativeDayLabel(g.date, today).toLowerCase())}<button data-r="rm" data-k="gym" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
+  (draft.activity || []).forEach((a, i) => extras.push(`<span class="rv-extra">${icon('walk', 16)}${esc(EN.describeAct(a))} · ${esc(relativeDayLabel(a.date, today).toLowerCase())}<button data-r="rm" data-k="activity" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   (draft.study || []).forEach((x, i) => extras.push(`<span class="rv-extra">${icon('book', 16)}Estudio ${fmt(x.hours, 1)} h · ${esc(relativeDayLabel(x.date, today).toLowerCase())}<button data-r="rm" data-k="study" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   draft.weight.forEach((w, i) => extras.push(`<span class="rv-extra">${icon('scale', 16)}${fmt(w.kg, 1)} kg · ${esc(relativeDayLabel(w.date, today).toLowerCase())}<button data-r="rm" data-k="weight" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   draft.skipped.forEach((k) => extras.push(`<span class="rv-extra muted">${esc(store.momentName(k.moment))}: sin registrar · ${esc(relativeDayLabel(k.date, today).toLowerCase())}</span>`));
@@ -814,6 +824,7 @@ function saveDraft(st, draft, { background = false } = {}) {
   for (const g of draft.gym) store.setGym(g.date, g.status, g.detail || '');
   for (const w of draft.weight) store.upsertBody(w.date, { weight: w.kg });
   for (const x of draft.study || []) store.setStudy(x.date, (store.day(x.date).study || 0) + x.hours);
+  for (const a of draft.activity || []) EN.addActivity(a.date, a);
   for (const g of draft.groups) for (const it of g.items) if (it._saveLib) saveItemAsFood(it);
   store.commit('save');
   const tot = AI.draftTotals(draft);

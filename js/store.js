@@ -3,7 +3,7 @@
 import { todayISO, uid, addDays, dateRange, weekStart, round1, round0, deepClone, isISODate, norm, parseISO, daysBetween } from './util.js';
 import { setCustomFoods, calc, getFood, foodUnits, unitLabel, canonUnit, sanitizePer100 } from './foods.js';
 
-export const APP_VERSION = '2.1.0';
+export const APP_VERSION = '2.2.0';
 const SCHEMA = 1;
 const DB_NAME = 'apextrack';
 const DB_STORE = 'kv';
@@ -49,11 +49,11 @@ export function defaultState() {
   return {
     schema: SCHEMA, version: APP_VERSION, createdAt: now, updatedAt: now,
     settings: {
-      profile: { name: '', heightCm: 180, sex: 'm', birthYear: null },
+      profile: { name: '', heightCm: 180, sex: 'm', birthYear: null, weightKg: null, goal: '', level: '', rawGrains: true },
       goals: { kcal: 3000, p: 120, c: 400, f: 70, sugarMax: 90, waterMl: 2500, gymDays: 4 },
       moments: deepClone(DEFAULT_MOMENTS),
       habits: deepClone(DEFAULT_HABITS),
-      ai: { key: '', model: 'auto', precision: 'equilibrada', web: true, notes: '', endpoint: '', resolvedModel: '', modelsAt: 0, models: [] },
+      ai: { key: '', model: 'auto', precision: 'equilibrada', web: false, webV2: true, notes: '', endpoint: '', resolvedModel: '', modelsAt: 0, models: [] },
       ui: { theme: 'auto', glassMl: 250, slotTab: 'gym' },
       backup: { lastAt: 0 },
     },
@@ -67,6 +67,7 @@ export function defaultState() {
     study: defaultStudy(),
     pending: [],
     aiLog: [],
+    insights: [],
   };
 }
 
@@ -152,6 +153,10 @@ export function migrate(d) {
   const out = { ...base, ...d };
   out.settings = { ...base.settings, ...(d.settings || {}) };
   for (const k of ['profile', 'goals', 'ai', 'ui', 'backup']) out.settings[k] = { ...base.settings[k], ...((d.settings || {})[k] || {}) };
+  // v2.2: la búsqueda de Google no tiene cupo en las claves gratuitas → apagada por defecto
+  if (!out.settings.ai.webV2) { out.settings.ai.web = false; out.settings.ai.webV2 = true; }
+  if (out.settings.ai.model && /^gemini-3\.(8|7|6)-flash$/.test(out.settings.ai.model) && !out.settings.ai.modelV2) out.settings.ai.model = 'auto';
+  out.settings.ai.modelV2 = true;
   if (!Array.isArray(out.settings.moments) || !out.settings.moments.length) out.settings.moments = deepClone(DEFAULT_MOMENTS);
   if (!Array.isArray(out.settings.habits)) out.settings.habits = deepClone(DEFAULT_HABITS);
   out.learn = { ...base.learn, ...(d.learn || {}) };
@@ -159,7 +164,7 @@ export function migrate(d) {
   if (!Array.isArray(out.gym.routines)) out.gym.routines = DEFAULT_ROUTINES();
   out.study = { ...defaultStudy(), ...(d.study || {}) };
   for (const k of ['subjects', 'sessions', 'events', 'tasks', 'notes']) if (!Array.isArray(out.study[k])) out.study[k] = [];
-  for (const k of ['entries', 'body', 'customFoods', 'pending', 'aiLog']) if (!Array.isArray(out[k])) out[k] = [];
+  for (const k of ['entries', 'body', 'customFoods', 'pending', 'aiLog', 'insights']) if (!Array.isArray(out[k])) out[k] = [];
   if (!out.days || typeof out.days !== 'object') out.days = {};
   if (!out.usage) out.usage = {};
   out.schema = SCHEMA;
