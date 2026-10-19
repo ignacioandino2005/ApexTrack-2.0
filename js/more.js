@@ -9,7 +9,8 @@ import { unitLabel, canonUnit, UNITS } from './foods.js';
 import { icon } from './icons.js';
 import { openSheet, toast, confirmDialog, pickOption, pickDate, promptText, formSheet, setBusy } from './ui.js';
 import { weekBars, weightLine, simpleLine } from './charts.js';
-import { ui, go, setDate, render, pickMoment, prettyModel, applyTheme, dayMarks } from './app.js';
+import { ui, go, setDate, render, pickMoment, prettyModel, applyTheme, dayMarks, SLOT_TABS } from './app.js';
+import { studyActions, studyTick } from './study.js';
 
 const METRICS = {
   kcal: { label: 'Kcal', unit: 'kcal', dec: 0, goal: (g) => g.kcal, val: (d) => store.dayTotals(d).kcal },
@@ -327,6 +328,7 @@ function startRest(sec, label = '') {
 function stopRest() { rest = null; if (restEl) { restEl.remove(); restEl = null; } }
 
 export function gymTimerTick() {
+  try { studyTick(); } catch (e) { console.error(e); }
   const el = document.getElementById('gym-elapsed');
   const A = store.S().gym?.active;
   if (el && A) el.textContent = elapsed(A.startedAt);
@@ -491,6 +493,7 @@ export function openSettings(section = null) {
       ${row('momentos', 'clock', 'Comidas del día', S.settings.moments.map((m) => m.name).join(', '))}
       ${row('habitos', 'pill', 'Hábitos y suplementos', S.settings.habits.map((h) => h.name).join(', '))}
       ${row('alimentos', 'library', 'Mis alimentos', `${S.customFoods.length} guardados`)}
+      ${row('slot', SLOT_TABS[S.settings.ui.slotTab || 'gym']?.[1] || 'dumbbell', 'Pestaña personalizable', 'La que aparece entre el micrófono y Progreso', SLOT_TABS[S.settings.ui.slotTab || 'gym']?.[0] || 'Gym')}
       ${row('tema', S.settings.ui.theme === 'dark' ? 'moon' : 'sun', 'Tema', '', themeL[S.settings.ui.theme] || 'Automático')}
       ${row('vaso', 'glass', 'Tamaño del vaso', '', `${S.settings.ui.glassMl || 250} ml`)}
     </div>
@@ -500,6 +503,9 @@ export function openSettings(section = null) {
       ${row('restore', 'upload', 'Restaurar copia', 'Desde un archivo .json de ApexTrack')}
       ${row('import', 'upload', 'Importar planilla anterior', 'El Excel o Google Sheets de la versión 1')}
       ${row('borrar', 'trash', 'Borrar todos los datos', '')}
+    </div>
+    <div class="set-group"><h3>Compartir</h3>
+      ${row('share', 'send', 'Compartir la app', 'Cada persona usa su propio teléfono, sus datos y su clave')}
     </div>
     <div class="set-group"><h3>Acerca de</h3>
       <div class="set-row-btn" style="cursor:default">${icon('info', 22)}<span class="grow">ApexTrack ${store.APP_VERSION}<small>Datos guardados solo en este teléfono (${esc(store.state.storage)}). ${store.S().entries.length} comidas registradas.</small></span></div>
@@ -529,6 +535,15 @@ export function openSettings(section = null) {
     else if (k === 'restore') restoreFlow();
     else if (k === 'import') importFlow();
     else if (k === 'borrar') wipeFlow();
+    else if (k === 'share') shareApp();
+    else if (k === 'slot') {
+      const v = await pickOption({ title: 'Pestaña personalizable', value: S.settings.ui.slotTab || 'gym', options: [
+        { value: 'gym', label: 'Gimnasio', sub: 'Rutinas, series, descanso y progresión', icon: 'dumbbell' },
+        { value: 'estudio', label: 'Estudio', sub: 'Cronómetro, pomodoro, materias, fechas de examen y pendientes', icon: 'book' },
+        { value: 'habitos', label: 'Hábitos', sub: 'Rachas y calendario de cada hábito y suplemento', icon: 'check' },
+      ] });
+      if (v) { const old = S.settings.ui.slotTab || 'gym'; S.settings.ui.slotTab = v; if (ui.tab === old) ui.tab = v; store.commit('slot'); }
+    }
   });
   return s;
 }
@@ -577,6 +592,7 @@ function openAISettings() {
     <div class="set-group" style="margin-top:14px">
       <button class="set-row-btn" data-a="prec">${icon('bolt', 22)}<span class="grow">Precisión<small>Máxima usa un modelo más grande: tarda más y gasta más cuota</small></span><span class="val">${PREC[ai.precision] || 'Equilibrada'}</span>${icon('right', 18)}</button>
       <button class="set-row-btn" data-a="model">${icon('sparkle', 22)}<span class="grow">Modelo<small>${ai.resolvedModel ? 'En uso: ' + esc(ai.resolvedModel) : 'Se elige solo el mejor disponible'}</small></span><span class="val">${ai.model === 'auto' || !ai.model ? 'Automático' : esc(ai.model)}</span>${icon('right', 18)}</button>
+      <button class="set-row-btn" data-a="diag">${icon('info', 22)}<span class="grow">Diagnóstico de la conexión<small>Prueba cada vía por separado y arma un informe para copiar (usa 4 consultas)</small></span>${icon('right', 18)}</button>
       <button class="set-row-btn" data-a="web">${icon('globe', 22)}<span class="grow">Buscar en internet<small>Para marcas, productos y comidas nuevas. Sin internet usa tu biblioteca.</small></span><span class="switch ${ai.web !== false ? 'on' : ''}" role="switch" aria-checked="${ai.web !== false}"></span></button>
     </div>
     <label class="field" style="margin-top:14px"><span>Indicaciones para la IA (opcional)</span><textarea class="input" id="ai-notes" rows="3" placeholder="Ej.: la leche que tomo es Protein de La Serenísima. Cuando digo 'un plato' de pasta son 350 g cocidos.">${esc(ai.notes || '')}</textarea></label>
@@ -584,7 +600,7 @@ function openAISettings() {
   const s = openSheet({ title: 'Inteligencia artificial', full: true, body: draw(), footer: `<button class="btn ghost" data-a="test">${icon('link', 18)} Probar conexión</button><button class="btn primary" data-a="save">Guardar</button>` });
   const readInputs = () => {
     const k = s.body.querySelector('#ai-key'); const n = s.body.querySelector('#ai-notes');
-    if (k) { const nv = k.value.trim().replace(/\s+/g, ''); if (nv !== ai.key) { ai.key = nv; ai.models = []; ai.modelsAt = 0; ai.resolvedModel = ''; ai.endpoint = ''; ai.auth = ''; } }
+    if (k) { const nv = k.value.trim().replace(/\s+/g, ''); if (nv !== ai.key) { ai.key = nv; ai.models = []; ai.modelsAt = 0; ai.resolvedModel = ''; ai.endpoint = ''; ai.auth = ''; ai.exhausted = {}; ai.webPauseUntil = 0; } }
     if (n) ai.notes = n.value;
   };
   const handler = async (e) => {
@@ -604,6 +620,7 @@ function openAISettings() {
       if (v) { ai.model = v; store.commit('ia'); s.setBody(draw()); }
     } else if (a === 'web') { ai.web = ai.web === false; store.commit('ia'); s.setBody(draw()); }
     else if (a === 'save') { store.commit('ia'); s.close(); toast(ai.key ? 'IA configurada' : 'Guardado (sin clave, se usa la biblioteca)'); }
+    else if (a === 'diag') { if (!ai.key) { toast('Pegá primero tu clave', { kind: 'error' }); return; } store.commit('ia'); openDiagnose(ai); }
     else if (a === 'test') {
       if (!ai.key) { toast('Pegá primero tu clave', { kind: 'error' }); return; }
       store.commit('ia');
@@ -990,13 +1007,14 @@ function moveWeek(d) {
 // Acciones (se suman a las de app.js)
 // ===========================================================================
 export const moreActions = {
+  ...studyActions,
   'dia-mode': (el) => { ui.diary.mode = el.dataset.v; render(); },
   'dia-metric': (el) => { ui.diary.metric = el.dataset.v; render(); },
   'dia-week': (el) => moveWeek(Number(el.dataset.d)),
   'dia-month': (el) => { const nm = addMonths(monthStart(ui.diary.month), Number(el.dataset.d)); if (nm <= todayISO()) { ui.diary.month = nm; render(); } },
   'dia-pick': async () => { const d = await pickDate({ title: 'Ir a la semana de…', value: ui.diary.sel, marks: dayMarks, max: todayISO() }); if (d) { ui.diary.week = weekStart(d); ui.diary.sel = d; render(); } },
   'dia-open': (el) => { const d = el.dataset.date; if (!d || d > todayISO()) return; ui.diary.sel = d; ui.tab = 'hoy'; history.replaceState({ tab: 'hoy' }, ''); setDate(d); window.scrollTo(0, 0); },
-  'chart-sel': (el) => { const d = el.dataset.date; if (d > todayISO()) return; if (ui.diary.sel === d && store.entriesOn(d).length) { moreActions['dia-open'](el); return; } ui.diary.sel = d; vibrate(6); render(); },
+  'chart-sel': (el) => { const d = el.dataset.date; if (d > todayISO()) return; if (el.closest('[data-chart="study"]')) { ui.study.sel = d; vibrate(6); render(); return; } if (ui.diary.sel === d && store.entriesOn(d).length) { moreActions['dia-open'](el); return; } ui.diary.sel = d; vibrate(6); render(); },
   'prog-range': (el) => { ui.prog.range = el.dataset.v === 'todo' ? 'todo' : Number(el.dataset.v); render(); },
   'weight-today': () => weightFor(todayISO()),
   'measures': () => openMeasures(),
@@ -1060,4 +1078,53 @@ async function weightFor(date) {
   const kg = parseNum(v);
   if (!(kg >= 25 && kg <= 300)) { toast('Ingresá un peso válido en kg', { kind: 'error' }); return; }
   store.upsertBody(date, { weight: round1(kg) }); store.commit('peso');
+}
+
+// ---------------------------------------------------------------------------
+// Diagnóstico de la IA
+// ---------------------------------------------------------------------------
+function openDiagnose(ai) {
+  let lines = []; let current = ''; let done = false;
+  const recent = store.S().aiLog.slice(0, 5);
+  const draw = () => `<p class="muted pad-b">Pruebo cada forma de conectar con Gemini por separado. Tarda hasta un minuto. Al final tocá <b>Copiar informe</b> y pegalo en el chat.</p>
+    ${lines.map((l) => `<div class="test-row"><h5>${icon(l.ok ? 'check' : 'alert', 18, l.ok ? 'ok' : 'bad')}${esc(l.name)}</h5><div class="note" style="word-break:break-word">${esc(l.info)}</div></div>`).join('')}
+    ${!done ? `<div class="status-line"><span class="spin"></span>${esc(current || 'Empezando…')}</div>` : ''}
+    ${done && recent.length ? `<h3 class="sub-h">Últimos análisis</h3>${recent.map((r) => `<div class="note">${esc(new Date(r.at).toLocaleString('es-AR'))} · ${r.ok ? `OK ${esc(r.model || '')} ${fmt((r.ms || 0) / 1000, 1)} s` : `ERROR ${esc(r.code || '')}: ${esc(r.msg || '')}`}${(r.log || []).length ? ' · ' + esc(r.log.map((x) => `${x.model} ${x.endpoint || ''} ${x.web ? 'web' : 'sinweb'} → ${x.status || 0} ${x.s ?? ''}s ${x.msg === 'ok' ? '' : x.msg}`).join(' | ')) : ''}</div>`).join('')}` : ''}`;
+  const s = openSheet({ title: 'Diagnóstico de la IA', full: true, body: draw(), footer: `<button class="btn primary" data-d="copy" disabled>${icon('copy', 18)} Copiar informe</button>` });
+  AI.diagnose(ai, (ls, cur) => { lines = ls; if (cur) current = `Probando: ${cur}…`; if (!s.closed) s.setBody(draw()); })
+    .catch((e) => { lines.push({ ok: false, name: 'Error inesperado', info: String(e && e.message || e) }); })
+    .finally(() => { done = true; store.commit('ia'); if (!s.closed) { s.setBody(draw()); s.foot.querySelector('[data-d="copy"]').disabled = false; } });
+  s.foot.addEventListener('click', async (e) => {
+    if (!e.target.closest('[data-d="copy"]')) return;
+    const rep = [`Diagnóstico ApexTrack ${store.APP_VERSION} · ${new Date().toLocaleString('es-AR')}`, ...lines.map((l) => `${l.ok ? '✓' : '✗'} ${l.name}: ${l.info}`), 'Últimos análisis:',
+      ...recent.map((r) => `- ${new Date(r.at).toLocaleString('es-AR')} ${r.ok ? `OK ${r.model} ${fmt((r.ms || 0) / 1000, 1)}s` : `ERROR ${r.code}: ${r.msg}`} ${(r.log || []).map((x) => `[${x.model} ${x.endpoint || ''} ${x.web ? 'web' : 'sinweb'} → ${x.status || 0} ${x.s ?? ''}s ${x.msg === 'ok' ? '' : x.msg}]`).join(' ')}`)].join('\n');
+    try { await navigator.clipboard.writeText(rep); toast('Informe copiado: pegalo en el chat'); } catch { toast('No se pudo copiar', { kind: 'error' }); }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Compartir y primer uso
+// ---------------------------------------------------------------------------
+async function shareApp() {
+  const url = location.origin + location.pathname;
+  const text = 'ApexTrack: registrá comidas, macros, agua, hábitos y gimnasio contándole a la IA lo que comiste. Abrilo en Chrome y tocá "Instalar app".';
+  try {
+    if (navigator.share) { await navigator.share({ title: 'ApexTrack', text, url }); return; }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(`${text}\n${url}`); toast('Enlace copiado'); } catch { toast(url, { ms: 8000 }); }
+}
+
+export async function maybeOnboard() {
+  const S = store.S();
+  if (S.settings.onboarded || S.entries.length || S.settings.ai.key) { if (!S.settings.onboarded) { S.settings.onboarded = true; store.save(); } return; }
+  await new Promise((r) => setTimeout(r, 400));
+  const go1 = await confirmDialog({ title: '¡Bienvenido/a a ApexTrack!', text: 'Contale a la app lo que comés (escribiendo o con la voz) y la IA calcula calorías y macros. En 1 minuto la dejamos a tu medida: tus metas y tu clave gratuita de Gemini.', ok: 'Empezar', cancel: 'Más tarde' });
+  S.settings.onboarded = true; store.commit('onboard');
+  if (!go1) return;
+  await editProfile();
+  const v = await pickOption({ title: '¿Qué pestaña querés tener?', value: S.settings.ui.slotTab || 'gym', options: [
+    { value: 'gym', label: 'Gimnasio', icon: 'dumbbell' }, { value: 'estudio', label: 'Estudio', icon: 'book' }, { value: 'habitos', label: 'Hábitos', icon: 'check' },
+  ] });
+  if (v) { S.settings.ui.slotTab = v; store.commit('slot'); }
+  openAISettings();
 }

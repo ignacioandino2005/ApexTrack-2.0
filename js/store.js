@@ -3,7 +3,7 @@
 import { todayISO, uid, addDays, dateRange, weekStart, round1, round0, deepClone, isISODate, norm, parseISO, daysBetween } from './util.js';
 import { setCustomFoods, calc, getFood, foodUnits, unitLabel, canonUnit, sanitizePer100 } from './foods.js';
 
-export const APP_VERSION = '2.0.3';
+export const APP_VERSION = '2.1.0';
 const SCHEMA = 1;
 const DB_NAME = 'apextrack';
 const DB_STORE = 'kv';
@@ -40,6 +40,10 @@ export const DEFAULT_ROUTINES = () => [
   { id: 'pierna_b', name: 'Pierna B', exercises: [EX('Sentadilla búlgara', 3, '8-10', 90), EX('Curl femoral tumbado', 3, '10-12', 90)] },
 ];
 
+export function defaultStudy() {
+  return { subjects: [], sessions: [], events: [], tasks: [], notes: [], active: null, pomo: { work: 25, rest: 5 } };
+}
+
 export function defaultState() {
   const now = Date.now();
   return {
@@ -50,7 +54,7 @@ export function defaultState() {
       moments: deepClone(DEFAULT_MOMENTS),
       habits: deepClone(DEFAULT_HABITS),
       ai: { key: '', model: 'auto', precision: 'equilibrada', web: true, notes: '', endpoint: '', resolvedModel: '', modelsAt: 0, models: [] },
-      ui: { theme: 'auto', glassMl: 250 },
+      ui: { theme: 'auto', glassMl: 250, slotTab: 'gym' },
       backup: { lastAt: 0 },
     },
     entries: [],
@@ -60,6 +64,7 @@ export function defaultState() {
     learn: { units: {}, aliases: {}, corrections: [] },
     usage: {},
     gym: { routines: DEFAULT_ROUTINES(), sessions: [], active: null },
+    study: defaultStudy(),
     pending: [],
     aiLog: [],
   };
@@ -152,6 +157,8 @@ export function migrate(d) {
   out.learn = { ...base.learn, ...(d.learn || {}) };
   out.gym = { ...base.gym, ...(d.gym || {}) };
   if (!Array.isArray(out.gym.routines)) out.gym.routines = DEFAULT_ROUTINES();
+  out.study = { ...defaultStudy(), ...(d.study || {}) };
+  for (const k of ['subjects', 'sessions', 'events', 'tasks', 'notes']) if (!Array.isArray(out.study[k])) out.study[k] = [];
   for (const k of ['entries', 'body', 'customFoods', 'pending', 'aiLog']) if (!Array.isArray(out[k])) out[k] = [];
   if (!out.days || typeof out.days !== 'object') out.days = {};
   if (!out.usage) out.usage = {};

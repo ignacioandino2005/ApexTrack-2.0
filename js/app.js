@@ -14,7 +14,8 @@ import {
 } from './ui.js';
 import { canDictate, canRecord, startDictation, startRecording } from './voice.js';
 import { pickImage, scanBarcode, lookupBarcode, canScan } from './camera.js';
-import { renderDiario, renderProgreso, renderGym, openSettings, gymTimerTick, wireCharts, maybeBackupReminder, moreActions } from './more.js';
+import { renderDiario, renderProgreso, renderGym, openSettings, gymTimerTick, wireCharts, maybeBackupReminder, moreActions, maybeOnboard } from './more.js';
+import { renderEstudio, renderHabitos } from './study.js';
 
 // ---------------------------------------------------------------------------
 // Estado de la interfaz
@@ -26,10 +27,19 @@ export const ui = {
   open: new Set(),
   diary: { mode: 'semana', week: weekStart(todayISO()), metric: 'kcal', sel: todayISO(), month: todayISO().slice(0, 8) + '01' },
   prog: { range: 30 },
+  study: { week: weekStart(todayISO()), sel: todayISO(), month: todayISO().slice(0, 8) + '01' },
   online: navigator.onLine !== false,
   jobs: [], // análisis que siguen en segundo plano
 };
-const TABS = ['hoy', 'diario', 'gym', 'progreso'];
+const TABS = ['hoy', 'diario', 'gym', 'estudio', 'habitos', 'progreso'];
+export const SLOT_TABS = { gym: ['Gym', 'dumbbell'], estudio: ['Estudio', 'book'], habitos: ['Hábitos', 'check'] };
+function slotTab() { const t = store.S().settings.ui.slotTab; return SLOT_TABS[t] ? t : 'gym'; }
+function paintSlot() {
+  const b = document.querySelector('.tab[data-slot]');
+  if (!b) return;
+  const t = slotTab();
+  if (b.dataset.tab !== t) { b.dataset.tab = t; b.innerHTML = `${icon(SLOT_TABS[t][1], 24)}${SLOT_TABS[t][0]}`; }
+}
 
 export function go(tab, { push = true } = {}) {
   if (!TABS.includes(tab)) tab = 'hoy';
@@ -60,6 +70,9 @@ export function render() {
   else if (ui.tab === 'diario') html = renderDiario();
   else if (ui.tab === 'gym') html = renderGym();
   else if (ui.tab === 'progreso') html = renderProgreso();
+  else if (ui.tab === 'estudio') html = renderEstudio();
+  else if (ui.tab === 'habitos') html = renderHabitos();
+  paintSlot();
   v.innerHTML = html;
   v.dataset.tab = ui.tab;
   document.querySelectorAll('.tab[data-tab]').forEach((b) => {
@@ -950,7 +963,7 @@ export function openItemEditor(item0, { mode = 'draft', title = 'Alimento', onSa
     }
     updateTotals();
   });
-  s.body.addEventListener('click', async (e) => {
+  const onClick = async (e) => {
     const b = e.target.closest('[data-e]');
     if (!b) return;
     const k = b.dataset.e;
@@ -1000,7 +1013,9 @@ export function openItemEditor(item0, { mode = 'draft', title = 'Alimento', onSa
       if (mode !== 'draft' && saveLib) saveItemAsFood(out);
       onSave && onSave(out, { saveToLibrary: false });
     }
-  });
+  };
+  s.body.addEventListener('click', onClick);
+  s.foot.addEventListener('click', onClick); // Guardar y Eliminar están en el pie de la hoja
   return s;
 }
 
@@ -1104,6 +1119,7 @@ function checkDayRollover() {
 async function boot() {
   await store.loadState();
   applyTheme();
+  document.querySelector('.tab[data-tab="gym"]')?.setAttribute('data-slot', '1');
   store.onChange(() => { if (ui.tab) render(); });
   history.replaceState({ tab: 'hoy' }, '');
   render();
@@ -1121,6 +1137,7 @@ async function boot() {
   if (p.get('accion') === 'agua') { store.addWater(todayISO(), store.S().settings.ui.glassMl || 250); store.commit('water'); toast('+1 vaso de agua'); }
   if (p.get('accion')) history.replaceState({ tab: 'hoy' }, '', location.pathname);
   maybeBackupReminder();
+  maybeOnboard();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('./sw.js').then((reg) => {
       reg.addEventListener('updatefound', () => {

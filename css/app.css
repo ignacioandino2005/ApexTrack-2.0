@@ -476,3 +476,35 @@ details summary { cursor: pointer; margin-top: 6px; }
 .chart .goal-t { paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
 .chip-row.metric { gap: 5px; }
 .chip-row.metric .chip { min-height: 36px; padding: 0 10px; font-size: 13.5px; }
+
+/* ---------- Estudio y Hábitos ---------- */
+.sdot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; flex: none; vertical-align: middle; }
+.st-timer { text-align: center; }
+.st-timer .muted { justify-content: center; }
+.st-clock { font-size: 58px; font-weight: 760; font-stretch: 112%; letter-spacing: -.03em; font-variant-numeric: tabular-nums; line-height: 1.1; margin: 8px 0 4px; }
+.st-row { width: 100%; display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); text-align: left; }
+.st-row:last-child { border-bottom: 0; }
+.st-row .grow b { display: block; font-weight: 600; font-size: 15px; }
+.st-row .grow small { display: block; color: var(--ink-3); font-size: 13px; margin-top: 2px; }
+.st-check { width: 28px; height: 28px; border-radius: 9px; border: 1.5px solid var(--ink-3); display: grid; place-items: center; flex: none; color: #fff; }
+.st-check.on { background: var(--good); border-color: var(--good); }
+.st-task-txt { text-align: left; min-width: 0; }
+.st-task-txt.done b { text-decoration: line-through; color: var(--ink-3); }
+.st-note { background: var(--surface-2); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+.st-note p { margin: 0 0 4px; white-space: pre-wrap; font-size: 14.5px; }
+.badge.warn-b { background: color-mix(in oklab, var(--warn) 20%, var(--surface)); color: var(--ink); }
+.st-cal.l1 { background: color-mix(in oklab, var(--accent) 14%, transparent); }
+.st-cal.l2 { background: color-mix(in oklab, var(--accent) 32%, transparent); }
+.st-cal.l3 { background: var(--accent); color: var(--accent-ink); }
+.dot.ev { background: var(--bad); }
+.cal-legend .lg { width: 12px; height: 12px; border-radius: 4px; display: inline-block; }
+.cal-legend .lg.l1 { background: color-mix(in oklab, var(--accent) 18%, transparent); }
+.cal-legend .lg.l3 { background: var(--accent); }
+.hb-card + .hb-card { margin-top: 10px; }
+.hb-w, .hb-g { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.hb-w span { text-align: center; font-size: 11.5px; color: var(--ink-3); font-weight: 600; padding-bottom: 4px; }
+.hb-cell { aspect-ratio: 1; max-height: 34px; border-radius: 8px; background: var(--surface-3); }
+.hb-cell.on { background: var(--good); }
+.hb-cell.tod { box-shadow: inset 0 0 0 2px var(--accent); }
+.hb-cell:disabled { opacity: .35; }
+.panel > .meter, .routine-card .meter { display: block; }

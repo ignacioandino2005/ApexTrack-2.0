@@ -2,7 +2,7 @@
 // La IA interpreta el mensaje (alimentos, cantidades, fechas, comidas, agua, suplementos, gym)
 // y da la composición por 100 g; la app hace TODAS las cuentas y valida el resultado.
 
-import { todayISO, addDays, parseISO, isISODate, norm, round1, round0, uid, nowHHMM, sleep, DIAS_CORTOS, DIAS, fmtDM, daysBetween } from './util.js';
+import { todayISO, isoDate, addDays, parseISO, isISODate, norm, round1, round0, uid, nowHHMM, sleep, DIAS_CORTOS, DIAS, fmtDM, daysBetween } from './util.js';
 import {
   sanitizePer100, canonUnit, bestMatch, getFood, gramsFor, per100Of, calc, parseLocal, unitLabel, hasOwnUnit,
   foodUnits, GENERIC_UNIT_G, numberWord, tokens, scoreTokens, isJunkText,
@@ -138,9 +138,10 @@ function fmtVals(p) {
 }
 
 /** Arma el contexto a partir del estado guardado. */
-export function buildContext({ baseDate = todayISO(), now = new Date(), baseMoment = null } = {}) {
+export function buildContext({ baseDate = null, now = new Date(), baseMoment = null } = {}) {
   const S = store.S();
-  const today = todayISO();
+  const today = isoDate(now);
+  if (!baseDate) baseDate = today;
   const refs = {};
   const refLines = [];
   let n = 0;
@@ -455,7 +456,8 @@ async function callGeminiNow({ ai, system, parts, web = true, onStatus = () => {
   const models = modelOrder(ai).filter((m) => !isExhausted(ai, m));
   if (!models.length) throw new AIError('cuota_dia', 'Se agotó el cupo diario gratuito de Gemini en todos los modelos. Se renueva entre las 4 y las 5 de la mañana. Mientras tanto podés calcular sin IA.');
   const thinking0 = THINKING[ai.precision] || 'medium';
-  let endpoint = ai.endpoint === 'generate' ? 'generate' : 'interactions';
+  // generateContent es el servicio estable y probado desde el navegador; Interactions queda de respaldo
+  let endpoint = ai.endpoint === 'interactions' && ai.endpointForced ? 'interactions' : 'generate';
   let auth = ai.auth || 'header';
   const log = [];
   let lastErr = null;
@@ -481,7 +483,7 @@ async function callGeminiNow({ ai, system, parts, web = true, onStatus = () => {
         ? interactionsBody({ model, system, parts, schema: v.schema ? schema : null, web: v.web, thinking })
         : generateBody({ system, parts, schema: v.schema ? schema : null, web: v.web, thinking });
       const tr = Date.now();
-      const r = await httpJSON(url, { method: 'POST', key: ai.key, body, auth, timeout: v.web ? 150000 : 90000 });
+      const r = await httpJSON(url, { method: 'POST', key: ai.key, body, auth, timeout: v.web ? 75000 : 50000 });
       const msg = errMessage(r);
       log.push({ model, endpoint, web: v.web, schema: v.schema, status: r.status, s: Math.round((Date.now() - tr) / 1000), msg: r.ok ? 'ok' : String(msg).slice(0, 160) });
       if (r.ok) {
@@ -532,7 +534,7 @@ async function callGeminiNow({ ai, system, parts, web = true, onStatus = () => {
       }
       if (s === 400 && /thinking/.test(low) && thinking) { thinking = null; vi--; status = 'Ajustando la consulta…'; continue; }
       if (s === 404 || /not found|is not supported|unsupported model|unknown model/.test(low)) {
-        if (endpoint === 'interactions' && !/model/.test(low) && !switchedEndpoint) { endpoint = 'generate'; switchedEndpoint = true; vi--; status = 'Ajustando la consulta…'; continue; }
+        if (!/model/.test(low) && !switchedEndpoint) { endpoint = endpoint === 'interactions' ? 'generate' : 'interactions'; switchedEndpoint = true; vi--; status = 'Ajustando la consulta…'; continue; }
         lastErr = new AIError('modelo', `El modelo ${model} no está disponible.`, msg);
         if (ai.models) ai.modelsAt = 0;
         status = 'Probando otro modelo…';
@@ -541,6 +543,9 @@ async function callGeminiNow({ ai, system, parts, web = true, onStatus = () => {
       if (s === 400 && endpoint === 'interactions' && /unknown name|invalid json payload|cannot find field/.test(low) && !switchedEndpoint) { endpoint = 'generate'; switchedEndpoint = true; vi--; status = 'Ajustando la consulta…'; continue; }
       if (s === 0 || s >= 500) {
         if (s === 0 && r.error !== 'timeout' && typeof navigator !== 'undefined' && navigator.onLine === false) throw new AIError('sin_conexion', 'Sin conexión a internet.');
+        // respuesta bloqueada por el navegador (no es la red): cambiar de servicio una vez
+        if (s === 0 && r.error !== 'timeout' && !switchedEndpoint) { endpoint = endpoint === 'interactions' ? 'generate' : 'interactions'; switchedEndpoint = true; vi--; status = 'Probando otra vía de conexión…'; lastErr = new AIError('red', 'No se pudo conectar con la IA.', msg); continue; }
+        if (s === 0 && r.error !== 'timeout') { lastErr = new AIError('red', 'No se pudo conectar con la IA (la conexión se cortó).', msg); if (log.filter((x) => x.status === 0).length >= 2) { mi = models.length; break; } }
         lastErr = new AIError(s === 0 ? 'red' : 'servidor', s === 0 ? (r.error === 'timeout' ? 'La IA tardó demasiado en responder.' : 'No se pudo conectar con la IA.') : 'El servicio de IA tuvo un problema momentáneo.', msg);
         if (r.error === 'timeout' && v.web) {
           // la búsqueda web demoró: no repetir otra consulta igual de pesada
@@ -558,6 +563,57 @@ async function callGeminiNow({ ai, system, parts, web = true, onStatus = () => {
   const e = new AIError('desconocido', 'No se pudo completar el análisis con la IA.');
   e.log = log;
   throw e;
+}
+
+/**
+ * Diagnóstico completo (Ajustes → IA): prueba cada vía por separado y devuelve un informe
+ * que se puede copiar. Usa 4 consultas de la cuota.
+ */
+export async function diagnose(ai, onStep = () => {}) {
+  const lines = [];
+  const add = (ok, name, info) => { lines.push({ ok, name, info }); onStep(lines.slice()); };
+  const env = `${typeof navigator !== 'undefined' ? navigator.userAgent.replace(/\s+/g, ' ').slice(0, 120) : 'node'} · online=${typeof navigator !== 'undefined' ? navigator.onLine : '?'}`;
+  add(true, 'Dispositivo', env);
+  if (!ai.key) { add(false, 'Clave', 'No hay clave cargada'); return lines; }
+  add(true, 'Clave', `${ai.key.slice(0, 4)}… (${ai.key.length} caracteres) · envío por ${ai.auth || 'header'}`);
+  let t = Date.now();
+  const lm = await httpJSON(`${API}/v1beta/models?pageSize=1000`, { key: ai.key, timeout: 20000, auth: ai.auth || 'header' });
+  let model = 'gemini-3.8-flash';
+  if (lm.ok && Array.isArray(lm.json?.models)) {
+    const rk = rankModels(lm.json.models.map((m) => String(m.name || '').replace(/^models\//, '')));
+    ai.models = rk; ai.modelsAt = Date.now();
+    model = (ai.model && ai.model !== 'auto') ? ai.model : (rk.flash[0] || model);
+    add(true, 'Lista de modelos', `${lm.json.models.length} modelos en ${Date.now() - t} ms · Flash: ${rk.flash.slice(0, 3).join(', ') || '—'} · Lite: ${rk.lite.slice(0, 2).join(', ') || '—'} · Pro: ${rk.pro.slice(0, 2).join(', ') || '—'}`);
+  } else add(false, 'Lista de modelos', `HTTP ${lm.status} ${lm.error || ''} ${errMessage(lm).slice(0, 200)}`);
+  const exh = Object.entries(ai.exhausted || {}).filter(([, d]) => d === quotaDay()).map(([m]) => m);
+  if (exh.length) add(false, 'Cupo diario marcado como agotado', exh.join(', '));
+  const sch = { type: 'object', properties: { kcal: { type: 'number' }, fuente: { type: 'string' } }, required: ['kcal'] };
+  const q = [{ text: 'Calorías por 100 g de galletitas Traviata (Bagley, Argentina). Respondé solo JSON {"kcal":número,"fuente":"..."}' }];
+  const steps = [
+    ['Gemini sin búsqueda (generateContent)', 'generate', false, sch],
+    ['Gemini con búsqueda web + formato JSON', 'generate', true, sch],
+    ['Gemini con búsqueda web, sin formato', 'generate', true, null],
+    ['Interactions (vía alternativa)', 'interactions', false, sch],
+  ];
+  for (const [name, ep, web, schema] of steps) {
+    onStep(lines.slice(), name);
+    await waitSlot(() => {});
+    t = Date.now();
+    const thinking = THINKING[ai.precision] || 'low';
+    const body = ep === 'interactions' ? interactionsBody({ model, system: 'Respondé en JSON.', parts: q, schema, web, thinking }) : generateBody({ system: 'Respondé en JSON.', parts: q, schema, web, thinking });
+    const url = ep === 'interactions' ? `${API}/v1beta/interactions` : `${API}/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+    const r = await httpJSON(url, { method: 'POST', key: ai.key, body, auth: ai.auth || 'header', timeout: 75000 });
+    const ms = Date.now() - t;
+    if (r.ok) {
+      const txt = extractText(r.json, ep);
+      const j = parseModelJSON(txt);
+      add(!!j, name, `${model} · ${(ms / 1000).toFixed(1)} s · ${j ? `respuesta ${JSON.stringify(j).slice(0, 90)}` : `texto no JSON: ${String(txt).slice(0, 90)}`}${web ? ` · fuentes ${collectSources(r.json).length}` : ''}`);
+    } else {
+      const extra = r.status === 429 ? ` (${quotaInfo(r).perDay ? 'cupo DIARIO' : 'límite por MINUTO'})` : '';
+      add(false, name, `${model} · ${(ms / 1000).toFixed(1)} s · HTTP ${r.status || 0}${extra} ${r.error ? '[' + r.error + ']' : ''} ${errMessage(r).slice(0, 220)}`);
+    }
+  }
+  return lines;
 }
 
 /** Prueba corta de conexión para Ajustes. */
