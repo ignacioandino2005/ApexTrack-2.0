@@ -9,13 +9,13 @@ import { openSheet, pickOption, toast } from './ui.js';
 const RANGES = { semana: ['Última semana', 7], mes: ['Último mes', 30], tres: ['Últimos 3 meses', 90], todo: ['Todo el historial', 0] };
 
 /** Resumen numérico del período (lo que lee la IA). Las cuentas las hace la app. */
-export function buildSummary(rangeKey = 'mes') {
+export function buildSummary(rangeKey = 'mes', custom = null) {
   const S = store.S();
-  const today = todayISO();
+  const today = custom?.to || todayISO();
   const first = store.firstDate();
   const n = RANGES[rangeKey]?.[1] || 0;
-  let from = n ? addDays(today, -(n - 1)) : first;
-  if (from < first) from = first;
+  let from = custom?.from || (n ? addDays(today, -(n - 1)) : first);
+  if (from < first && !custom) from = first;
   const days = dateRange(from, today);
   const g = store.goals();
   const p = S.settings.profile;
@@ -76,29 +76,32 @@ const SCHEMA = {
     titulo: { type: 'string' }, puntaje: { type: 'number', description: '0 a 10' }, resumen: { type: 'string' },
     bien: { type: 'array', items: { type: 'string' } }, mal: { type: 'array', items: { type: 'string' } },
     mejorar: { type: 'array', items: { type: 'string' } }, evitar: { type: 'array', items: { type: 'string' } },
+    cambiar: { type: 'array', items: { type: 'string' }, description: 'Reemplazos concretos: qué cambiar por qué' },
     proximo_paso: { type: 'string' },
   },
-  required: ['titulo', 'puntaje', 'resumen', 'bien', 'mal', 'mejorar', 'evitar', 'proximo_paso'],
+  required: ['titulo', 'puntaje', 'resumen', 'bien', 'mal', 'mejorar', 'cambiar', 'evitar', 'proximo_paso'],
 };
 const PROMPT = `Sos un nutricionista deportivo y coach que revisa el registro de una persona (Argentina, español rioplatense, tono cálido y directo, tuteo con "vos").
 Con el resumen numérico del período, evaluá cómo va respecto de SU objetivo. Basate solo en los datos; si hay pocos días registrados, decilo y bajá la confianza.
 - bien: 2 a 4 cosas concretas que hace bien, con números ("Promediaste 128 g de proteína, por encima de tu meta").
 - mal: 2 a 4 problemas concretos con números.
 - mejorar: 3 a 5 acciones simples y específicas para la semana que viene (alimentos argentinos comunes, cantidades).
+- cambiar: 2 a 4 reemplazos concretos mirando sus alimentos reales ("Cambiá la gaseosa común de la cena por la versión sin azúcar: −210 kcal", "En vez de 3 bollos de pan francés, 1 bollo y una porción de ensalada").
 - evitar: 2 a 4 cosas puntuales a evitar, mirando los alimentos y horarios que más pesan.
 - puntaje: 0 a 10 según qué tan alineado está con su objetivo. titulo: frase corta. resumen: 2 o 3 frases. proximo_paso: la UNA acción más importante.
 No des consejos médicos; si ves algo preocupante (comer muy poco, bajar muy rápido) sugerí consultar a un profesional. Respondé solo el JSON.`;
 
-export async function runInsights(rangeKey, onStatus) {
-  const sum = buildSummary(rangeKey);
+export async function runInsights(rangeKey, onStatus, custom = null) {
+  const sum = buildSummary(rangeKey, custom);
   if (sum.daysLogged < 2) throw new Error('Hacen falta al menos 2 días con comidas registradas en el período.');
   const ai = store.S().settings.ai;
-  const res = await AI.callGemini({ ai, system: PROMPT, parts: [{ text: `${RANGES[rangeKey][0].toUpperCase()}\n${sum.text}` }], web: false, schema: SCHEMA, onStatus });
+  const label = custom?.label || RANGES[rangeKey]?.[0] || 'Período';
+  const res = await AI.callGemini({ ai, system: PROMPT, parts: [{ text: `${label.toUpperCase()}\n${sum.text}` }], web: false, schema: SCHEMA, onStatus });
   const r = res.raw || {};
   const rep = {
-    id: `in${Date.now()}`, at: Date.now(), range: rangeKey, from: sum.from, to: sum.to, days: sum.daysLogged, model: res.model,
+    id: `in${Date.now()}`, at: Date.now(), range: rangeKey, label: custom?.label || '', from: sum.from, to: sum.to, days: sum.daysLogged, model: res.model,
     titulo: String(r.titulo || 'Tu progreso'), puntaje: Math.max(0, Math.min(10, Number(r.puntaje) || 0)), resumen: String(r.resumen || ''),
-    bien: (r.bien || []).map(String).slice(0, 5), mal: (r.mal || []).map(String).slice(0, 5), mejorar: (r.mejorar || []).map(String).slice(0, 6), evitar: (r.evitar || []).map(String).slice(0, 5),
+    bien: (r.bien || []).map(String).slice(0, 5), mal: (r.mal || []).map(String).slice(0, 5), mejorar: (r.mejorar || []).map(String).slice(0, 6), cambiar: (r.cambiar || []).map(String).slice(0, 5), evitar: (r.evitar || []).map(String).slice(0, 5),
     proximo: String(r.proximo_paso || ''),
   };
   const S = store.S();
@@ -107,12 +110,12 @@ export async function runInsights(rangeKey, onStatus) {
   return rep;
 }
 
-function reportHtml(r) {
+export function reportHtml(r, { compact = false } = {}) {
   const sec = (title, ic, cls, arr) => (arr.length ? `<h3 class="sub-h ${cls}" style="display:flex;gap:6px;align-items:center">${icon(ic, 18)}${title}</h3><ul class="ins-list">${arr.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '');
-  return `<div class="ins-head"><div class="ins-score"><b>${fmt(r.puntaje, r.puntaje % 1 ? 1 : 0)}</b><small>de 10</small></div><div><h3 style="margin:0">${esc(r.titulo)}</h3><p class="muted" style="margin:4px 0 0;font-size:13px">${esc(RANGES[r.range]?.[0] || '')} · ${esc(cap(fmtDayShort(r.from)))} a ${esc(fmtDayShort(r.to))} · ${r.days} días registrados</p></div></div>
+  return `<div class="ins-head"><div class="ins-score"><b>${fmt(r.puntaje, r.puntaje % 1 ? 1 : 0)}</b><small>de 10</small></div><div><h3 style="margin:0">${esc(r.titulo)}</h3><p class="muted" style="margin:4px 0 0;font-size:13px">${esc(RANGES[r.range]?.[0] || r.label || '')} · ${esc(cap(fmtDayShort(r.from)))} a ${esc(fmtDayShort(r.to))} · ${r.days} días registrados</p></div></div>
     <p style="margin:12px 0 0">${esc(r.resumen)}</p>
     ${r.proximo ? `<div class="banner info" style="margin-top:12px">${icon('bolt', 20)}<div class="grow"><b>Próximo paso:</b> ${esc(r.proximo)}</div></div>` : ''}
-    ${sec('Lo que va bien', 'check', 'ok', r.bien)}${sec('Lo que va mal', 'alert', 'bad', r.mal)}${sec('Qué mejorar', 'bolt', '', r.mejorar)}${sec('Qué evitar', 'x', 'bad', r.evitar)}
+    ${compact ? '' : sec('Lo que va bien', 'check', 'ok', r.bien)}${sec('Lo que va mal', 'alert', 'bad', r.mal)}${sec('Qué mejorar', 'bolt', '', r.mejorar)}${sec('Qué cambiar', 'repeat', '', r.cambiar || [])}${sec('Qué evitar', 'x', 'bad', r.evitar)}
     <p class="note" style="margin-top:14px">Análisis automático con IA a partir de tus registros: es orientativo y no reemplaza a un profesional.</p>`;
 }
 
@@ -141,6 +144,6 @@ export function insightsCard() {
   return `<section class="panel" style="margin-bottom:12px">
     <div class="kv"><span>${icon('sparkle', 18)}¿Cómo vengo?</span>${last ? `<button class="link" data-act="insight-open" data-id="${last.id}">Último: ${fmt(last.puntaje, last.puntaje % 1 ? 1 : 0)}/10 · ${esc(fmtDayShort(new Date(last.at).toLocaleDateString('sv-SE')))}</button>` : ''}</div>
     <p class="note" style="margin:6px 0 10px">La IA revisa tus registros y te dice qué va bien, qué va mal, qué mejorar y qué evitar.</p>
-    <button class="btn primary" style="width:100%" data-act="insight-run">${icon('sparkle', 18)} Analizar mi progreso</button>
+    <div style="display:flex;gap:8px"><button class="btn" style="flex:1" data-act="weekly-ask">${icon('calendar', 18)} Resumen semanal</button><button class="btn primary" style="flex:1" data-act="insight-run">${icon('sparkle', 18)} Analizar con IA</button></div>
   </section>`;
 }

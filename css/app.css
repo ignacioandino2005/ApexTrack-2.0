@@ -531,3 +531,28 @@ div.field > span { display: block; margin-bottom: 6px; }
 .sub-h.ok .ic { color: var(--good); } .sub-h.bad .ic { color: var(--bad); }
 .steps { margin: 0 0 6px; padding-left: 20px; display: grid; gap: 8px; font-size: 14.5px; line-height: 1.4; }
 .steps code, .note code { background: var(--surface-3); border-radius: 6px; padding: 1px 5px; font-size: 13px; }
+
+/* Recordatorios: selector de hora propio */
+.time-pick { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 6px; }
+.tp-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.tp-col b { font-size: 40px; font-variant-numeric: tabular-nums; line-height: 1; min-width: 64px; text-align: center; }
+.tp-sep { font-size: 36px; font-weight: 700; color: var(--ink-3); }
+
+/* Pestaña personalizable: flechita y menú para cambiar sin ir a Ajustes */
+.slot-wrap { position: relative; display: grid; }
+.slot-more { position: absolute; top: -13px; left: 50%; transform: translateX(-50%); width: 40px; height: 20px; border-radius: 10px 10px 0 0; background: var(--surface); border: 1px solid var(--line); border-bottom: 0; color: var(--ink-3); display: grid; place-items: center; z-index: 2; }
+.slot-more[aria-expanded="true"] { color: var(--accent); }
+.slot-more[aria-expanded="true"] svg { transform: rotate(180deg); }
+.slot-menu { position: absolute; bottom: calc(100% + 16px); left: 50%; transform: translateX(-50%); min-width: 190px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 6px; box-shadow: 0 10px 30px rgba(0,0,0,.18); display: flex; flex-direction: column; animation: fade .15s ease-out; z-index: 3; }
+.slot-menu button { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 12px; font-weight: 600; color: var(--ink); text-align: left; }
+.slot-menu button small { margin-left: auto; font-weight: 500; color: var(--ink-3); font-size: 12px; }
+.slot-menu button.on { background: var(--surface-3); }
+.slot-menu button.on .ic { color: var(--accent); }
+.slot-menu button:active { background: var(--surface-3); }
+
+/* Pestaña Agua */
+.water-big { padding-top: 18px; }
+.wb-ring { --p: 0; width: 172px; height: 172px; margin: 0 auto; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--accent) calc(var(--p) * 1%), var(--surface-3) 0); }
+.wb-ring > div { width: 140px; height: 140px; border-radius: 50%; background: var(--surface); display: grid; place-items: center; align-content: center; }
+.wb-ring b { font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; }
+.wb-ring small { color: var(--ink-3); font-size: 13px; margin-top: 4px; }

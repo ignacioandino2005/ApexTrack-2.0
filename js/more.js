@@ -16,6 +16,8 @@ import { openGoals } from './profile.js';
 import { insightsCard, openInsights, openInsight } from './insights.js';
 import * as BK from './backup.js';
 import * as CM from './community.js';
+import { openReminders } from './notify.js';
+import { askWeekly } from './weekly.js';
 
 const METRICS = {
   kcal: { label: 'Kcal', unit: 'kcal', dec: 0, goal: (g) => g.kcal, val: (d) => store.dayTotals(d).kcal },
@@ -496,10 +498,12 @@ export function openSettings(section = null) {
       ${row('bench', 'check', 'Probar la IA', 'Mensajes de prueba con resultados esperados (no se guardan)')}
     </div>
     <div class="set-group"><h3>Personalizar</h3>
+      ${row('slot', SLOT_TABS[S.settings.ui.slotTab || 'gym']?.[1] || 'dumbbell', 'Pestaña personalizable', 'La principal entre el micrófono y Progreso (con la flechita de arriba cambiás a las otras)', SLOT_TABS[S.settings.ui.slotTab || 'gym']?.[0] || 'Gym')}
+      ${row('avisos', 'bell', 'Recordatorios', S.settings.reminders?.on ? `${(S.settings.reminders.list || []).filter((x) => x.on).length} activos` : 'Comidas, agua, hábitos, estudio y resúmenes')}
+      ${row('semanal', 'calendar', 'Resumen semanal', `Los ${['domingos', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados'][S.settings.weekly?.day ?? 1]}${S.settings.weekly?.ai !== false ? ', con consejos de la IA' : ''}`)}
       ${row('momentos', 'clock', 'Comidas del día', S.settings.moments.map((m) => m.name).join(', '))}
       ${row('habitos', 'pill', 'Hábitos y suplementos', S.settings.habits.map((h) => h.name).join(', '))}
       ${row('alimentos', 'library', 'Mis alimentos', `${S.customFoods.length} guardados`)}
-      ${row('slot', SLOT_TABS[S.settings.ui.slotTab || 'gym']?.[1] || 'dumbbell', 'Pestaña personalizable', 'La que aparece entre el micrófono y Progreso', SLOT_TABS[S.settings.ui.slotTab || 'gym']?.[0] || 'Gym')}
       ${row('tema', S.settings.ui.theme === 'dark' ? 'moon' : 'sun', 'Tema', '', themeL[S.settings.ui.theme] || 'Automático')}
       ${row('vaso', 'glass', 'Tamaño del vaso', '', `${S.settings.ui.glassMl || 250} ml`)}
     </div>
@@ -546,11 +550,28 @@ export function openSettings(section = null) {
     else if (k === 'cloud') openCloudSetup();
     else if (k === 'recover') openRecover();
     else if (k === 'share') shareApp();
+    else if (k === 'avisos') openReminders();
+    else if (k === 'semanal') {
+      const w = S.settings.weekly;
+      const v = await pickOption({ title: 'Resumen semanal', options: [
+        { value: 'ver', label: 'Ver un resumen ahora', icon: 'sparkle' },
+        { value: 'dia', label: 'Día en que se arma', sub: ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][w.day ?? 1], icon: 'calendar' },
+        { value: 'ia', label: w.ai !== false ? 'Consejos de la IA: activados' : 'Consejos de la IA: desactivados', sub: 'Usa 1 consulta de Gemini por semana', icon: 'bolt' },
+      ] });
+      if (v === 'ver') askWeekly();
+      else if (v === 'ia') { w.ai = w.ai === false; store.commit('semanal'); }
+      else if (v === 'dia') {
+        const d = await pickOption({ title: '¿Qué día?', value: w.day ?? 1, options: [1, 2, 3, 4, 5, 6, 0].map((x) => ({ value: x, label: ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][x] })) });
+        if (d != null) { w.day = d; const r = (S.settings.reminders?.list || []).find((x) => x.type === 'resumen'); if (r) r.days = [d]; store.commit('semanal'); }
+      }
+    }
     else if (k === 'slot') {
       const v = await pickOption({ title: 'Pestaña personalizable', value: S.settings.ui.slotTab || 'gym', options: [
         { value: 'gym', label: 'Gimnasio', sub: 'Rutinas, series, descanso y progresión', icon: 'dumbbell' },
         { value: 'estudio', label: 'Estudio', sub: 'Cronómetro, pomodoro, materias, fechas de examen y pendientes', icon: 'book' },
         { value: 'habitos', label: 'Hábitos', sub: 'Rachas y calendario de cada hábito y suplemento', icon: 'check' },
+        { value: 'actividad', label: 'Actividad', sub: 'Pasos, reloj inteligente, calorías gastadas y balance', icon: 'walk' },
+        { value: 'agua', label: 'Agua', sub: 'Progreso del día, botones rápidos, racha y semana', icon: 'drop' },
       ] });
       if (v) { const old = S.settings.ui.slotTab || 'gym'; S.settings.ui.slotTab = v; if (ui.tab === old) ui.tab = v; store.commit('slot'); }
     }

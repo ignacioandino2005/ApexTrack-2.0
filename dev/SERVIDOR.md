@@ -59,7 +59,24 @@ Qué se guarda y qué no:
   identifica con un número al azar, solo para contar cuántas personas confirman un dato.
 - Cada persona lo puede desactivar en Ajustes → Inteligencia artificial → "Ayudar a entrenarla".
 
-## 3. Pruebas
+## 3. Avisos con la app cerrada (notificaciones push)
+
+Usan el mismo Apps Script de la comunidad (`server/comunidad.gs`). Cada teléfono le manda sus horarios de
+los próximos 14 días; cada 5 minutos el script despierta a los teléfonos que tienen un aviso vencido y el
+propio teléfono decide qué mostrar (por ejemplo, no avisa del almuerzo si ya lo registraste).
+
+1. En el editor de Apps Script, reemplazá todo el código por el nuevo `server/comunidad.gs` y guardá.
+2. Arriba elegí la función **instalarAvisos** → **Ejecutar** → autorizá (pide permiso para "conectarse a un
+   servicio externo": es para mandar los avisos a Google/Chrome). Crea las claves de los avisos (quedan
+   guardadas en el script, nunca en el repositorio) y un disparador cada 5 minutos.
+3. **Implementar → Gestionar implementaciones → editar (lápiz) → Versión: Nueva versión → Implementar.**
+   La URL no cambia.
+4. Para revisar: `URL?op=estado` tiene que mostrar `"avisos_listos": true` y cuántos teléfonos están suscriptos.
+
+En el teléfono: Ajustes → Recordatorios → activar. Si el servidor no está listo, los avisos funcionan igual
+mientras la app esté abierta o en segundo plano.
+
+## 4. Pruebas
 
 Desde `dev/`: `npm install` una vez y después, dentro de `dev/test/`:
 
@@ -70,6 +87,9 @@ node ai_pipeline.test.mjs
 node client.test.mjs        # modelos, límites, errores y consulta de respaldo
 node local_first.test.mjs   # qué resuelve la IA propia sola
 node server.test.mjs        # servicio de la comunidad (simulado) de punta a punta
+node vapid.test.mjs         # firma de los avisos (verificada con WebCrypto) y envío
+node reminders.test.mjs     # qué recordatorio se muestra y cuál se saltea
+node features.mjs           # pestañas nuevas, recordatorios, resumen semanal, capturas compartidas (Chromium)
 node persist.mjs            # pérdida y recuperación de datos, Drive y comunidad (Chromium)
 node e2e.mjs                # todos los botones y menús (Chromium)
 ```

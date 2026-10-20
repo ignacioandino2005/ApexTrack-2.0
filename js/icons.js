@@ -55,6 +55,10 @@ const P = {
   walk: '<circle cx="13.5" cy="4.5" r="1.8"/><path d="M10.5 21l2.2-6.2 2.8 2.7V21M8.5 12.5l1.8-4.4 3.6 1.2 2.6 3.2M10.3 8.1L7.5 11"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   pill: '<path d="M10.5 20.5l10-10a4.95 4.95 0 0 0-7-7l-10 10a4.95 4.95 0 0 0 7 7z"/><path d="M8.5 8.5l7 7"/>',
+  bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  meal: '<path d="M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10M16.5 21V3c-2 1.2-3 3.6-3 7v3h3"/>',
+  watch: '<rect x="6.5" y="6.5" width="11" height="11" rx="3"/><path d="M9 6.5l.6-3.5h4.8l.6 3.5M9 17.5l.6 3.5h4.8l.6-3.5M12 9.5V12l1.5 1"/>',
+  share: '<circle cx="18" cy="5.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="18.5" r="2.5"/><path d="M8.2 10.8l7.6-4M8.2 13.2l7.6 4"/>',
 };
 
 export function icon(name, size = 22, cls = '') {

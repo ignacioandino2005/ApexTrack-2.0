@@ -36,6 +36,8 @@ function norm_(s) {
 function doPost(e) {
   let body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, error: 'json' }); }
+  if (body && body.op === 'avisos') return json_(guardarAvisos_(body));
+  if (body && body.op === 'baja') return json_(bajaAvisos_(body));
   if (!body || body.v !== 1 || !Array.isArray(body.records)) return json_({ ok: false, error: 'formato' });
   const inst = txt_(body.install, 40);
   const ver = txt_(body.app, 12);
@@ -66,9 +68,14 @@ function doPost(e) {
 // ---------------------------------------------------------------------------
 function doGet(e) {
   const op = (e && e.parameter && e.parameter.op) || 'conocimiento';
+  if (op === 'vapid') {
+    const k = PropertiesService.getScriptProperties().getProperty('vapid_pub');
+    return json_(k ? { ok: true, key: k } : { ok: false, error: 'Falta correr instalarAvisos()' });
+  }
   if (op === 'estado') {
     const a = hoja_('aportes', COL_APORTES); const m = hoja_('mensajes', COL_MENSAJES);
-    return json_({ ok: true, aportes: Math.max(0, a.getLastRow() - 1), mensajes: Math.max(0, m.getLastRow() - 1) });
+    const av = hoja_('avisos', COL_AVISOS);
+    return json_({ ok: true, aportes: Math.max(0, a.getLastRow() - 1), mensajes: Math.max(0, m.getLastRow() - 1), avisos: Math.max(0, av.getLastRow() - 1), avisos_listos: !!PropertiesService.getScriptProperties().getProperty('vapid_pub') });
   }
   const props = PropertiesService.getScriptProperties();
   const id = props.getProperty('archivo');
@@ -152,4 +159,166 @@ function instalar() {
   ScriptApp.getProjectTriggers().filter((t) => t.getHandlerFunction() === 'rearmar').forEach((t) => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('rearmar').timeBased().everyDays(1).atHour(4).create();
   rearmar();
+}
+
+// ===========================================================================
+// AVISOS (notificaciones "push" que llegan con la app cerrada)
+// ---------------------------------------------------------------------------
+// Cada teléfono manda su suscripción y la lista de horarios (próximos 14 días) en que quiere un aviso.
+// Cada 5 minutos, enviarAvisos() despierta a los teléfonos que tienen un horario vencido. El push va
+// vacío: el propio teléfono decide qué mostrar (por ejemplo, no avisa del almuerzo si ya lo registró).
+// La firma VAPID (ECDSA P-256) está implementada acá mismo porque Apps Script no la trae.
+// Para activarlo: correr una vez instalarAvisos() y volver a implementar (versión nueva).
+// ===========================================================================
+const COL_AVISOS = ['id', 'endpoint', 'p256dh', 'auth', 'horarios', 'actualizado', 'ultimo_envio', 'instalacion'];
+const CONTACTO = 'mailto:ignacioandino2005@gmail.com';
+
+function guardarAvisos_(body) {
+  const sub = body.sub || {};
+  const ep = String(sub.endpoint || '');
+  if (!/^https:\/\/[a-z0-9.-]+\//i.test(ep) || ep.length > 900) return { ok: false, error: 'suscripcion' };
+  const ahora = Date.now();
+  const horarios = (Array.isArray(body.times) ? body.times : []).map(Number).filter((t) => t > ahora - 600000 && t < ahora + 16 * 86400000).sort((a, b) => a - b).slice(0, 400);
+  const id = hash_(ep);
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const h = hoja_('avisos', COL_AVISOS);
+    const fila = buscarFila_(h, id);
+    const datos = [id, ep, txt_((sub.keys || {}).p256dh, 200), txt_((sub.keys || {}).auth, 100), JSON.stringify(horarios), new Date(), fila ? h.getRange(fila, 7).getValue() : 0, txt_(body.install, 40)];
+    if (fila) h.getRange(fila, 1, 1, COL_AVISOS.length).setValues([datos]);
+    else h.getRange(h.getLastRow() + 1, 1, 1, COL_AVISOS.length).setValues([datos]);
+  } finally { lock.releaseLock(); }
+  return { ok: true, horarios: horarios.length };
+}
+function bajaAvisos_(body) {
+  const ep = String((body.sub || {}).endpoint || '');
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try { const h = hoja_('avisos', COL_AVISOS); const f = buscarFila_(h, hash_(ep)); if (f) h.deleteRow(f); } finally { lock.releaseLock(); }
+  return { ok: true };
+}
+function buscarFila_(h, id) {
+  if (h.getLastRow() < 2) return 0;
+  const ids = h.getRange(2, 1, h.getLastRow() - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i++) if (ids[i][0] === id) return i + 2;
+  return 0;
+}
+function hash_(s) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s).slice(0, 12).map((b) => ((b + 256) % 256).toString(16).padStart(2, '0')).join('');
+}
+
+/** Lo corre el disparador cada 5 minutos. */
+function enviarAvisos() {
+  const h = hoja_('avisos', COL_AVISOS);
+  if (h.getLastRow() < 2) return;
+  const ahora = Date.now();
+  const filas = h.getRange(2, 1, h.getLastRow() - 1, COL_AVISOS.length).getValues();
+  const borrar = [];
+  filas.forEach((f, i) => {
+    let horarios = [];
+    try { horarios = JSON.parse(f[4] || '[]'); } catch (err) { horarios = []; }
+    const ultimo = Number(f[6]) || 0;
+    // vencidos desde el último envío (los de hace más de 30 minutos ya no sirven)
+    const vencidos = horarios.filter((t) => t > ultimo && t <= ahora + 60000 && t > ahora - 30 * 60000);
+    if (!vencidos.length) return;
+    const r = enviarPush_(f[1]);
+    if (r === 404 || r === 410) { borrar.push(i + 2); return; }
+    h.getRange(i + 2, 7).setValue(ahora);
+    h.getRange(i + 2, 5).setValue(JSON.stringify(horarios.filter((t) => t > ahora)));
+  });
+  borrar.reverse().forEach((n) => h.deleteRow(n));
+}
+
+function enviarPush_(endpoint) {
+  const aud = endpoint.match(/^https:\/\/[^/]+/)[0];
+  const props = PropertiesService.getScriptProperties();
+  const cache = CacheService.getScriptCache();
+  let jwt = cache.get('jwt_' + aud);
+  if (!jwt) { jwt = firmarJwt_(aud, props.getProperty('vapid_priv')); cache.put('jwt_' + aud, jwt, 6 * 3600); }
+  const res = UrlFetchApp.fetch(endpoint, {
+    method: 'post', payload: '', muteHttpExceptions: true,
+    headers: { Authorization: 'vapid t=' + jwt + ', k=' + props.getProperty('vapid_pub'), TTL: '1800', Urgency: 'high' },
+  });
+  return res.getResponseCode();
+}
+
+/** Crea las claves VAPID (una sola vez) y el disparador cada 5 minutos. */
+function instalarAvisos() {
+  hoja_('avisos', COL_AVISOS);
+  const props = PropertiesService.getScriptProperties();
+  if (!props.getProperty('vapid_priv')) {
+    const k = generarClaves_();
+    props.setProperty('vapid_priv', k.priv);
+    props.setProperty('vapid_pub', k.pub);
+  }
+  ScriptApp.getProjectTriggers().filter((t) => t.getHandlerFunction() === 'enviarAvisos').forEach((t) => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('enviarAvisos').timeBased().everyMinutes(5).create();
+  Logger.log('Clave pública: ' + props.getProperty('vapid_pub'));
+}
+
+// ---------------------------------------------------------------------------
+// ECDSA P-256 (curva secp256r1) con BigInt
+// ---------------------------------------------------------------------------
+const EC_P = BigInt('0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff');
+const EC_N = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');
+const EC_G = [BigInt('0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296'), BigInt('0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5'), 1n];
+const md_ = (a, m) => { const r = a % m; return r < 0n ? r + m : r; };
+function inv_(a, m) {
+  let r0 = md_(a, m); let r1 = m; let s0 = 1n; let s1 = 0n;
+  while (r1) { const q = r0 / r1; [r0, r1] = [r1, r0 - q * r1]; [s0, s1] = [s1, s0 - q * s1]; }
+  return md_(s0, m);
+}
+function dbl_(pt) {
+  const [X, Y, Z] = pt; const p = EC_P;
+  if (!Z || !Y) return [0n, 1n, 0n];
+  const delta = Z * Z % p; const gamma = Y * Y % p; const beta = X * gamma % p;
+  const alpha = md_(3n * (X - delta) * (X + delta), p);
+  const X3 = md_(alpha * alpha - 8n * beta, p);
+  const Z3 = md_((Y + Z) * (Y + Z) - gamma - delta, p);
+  const Y3 = md_(alpha * (4n * beta - X3) - 8n * gamma * gamma, p);
+  return [X3, Y3, Z3];
+}
+function add_(a, b) {
+  const p = EC_P;
+  if (!a[2]) return b; if (!b[2]) return a;
+  const Z1Z1 = a[2] * a[2] % p; const Z2Z2 = b[2] * b[2] % p;
+  const U1 = a[0] * Z2Z2 % p; const U2 = b[0] * Z1Z1 % p;
+  const S1 = a[1] * b[2] % p * Z2Z2 % p; const S2 = b[1] * a[2] % p * Z1Z1 % p;
+  if (U1 === U2) return S1 === S2 ? dbl_(a) : [0n, 1n, 0n];
+  const H = md_(U2 - U1, p); const I = 4n * H * H % p; const J = H * I % p; const r = md_(2n * (S2 - S1), p); const V = U1 * I % p;
+  const X3 = md_(r * r - J - 2n * V, p);
+  const Y3 = md_(r * (V - X3) - 2n * S1 * J, p);
+  const Z3 = md_(((a[2] + b[2]) * (a[2] + b[2]) - Z1Z1 - Z2Z2) * H, p);
+  return [X3, Y3, Z3];
+}
+function mul_(k, pt) {
+  let R = [0n, 1n, 0n];
+  for (let i = BigInt(k.toString(2).length - 1); i >= 0n; i--) { R = dbl_(R); if ((k >> i) & 1n) R = add_(R, pt); }
+  return R;
+}
+function afin_(pt) { const zi = inv_(pt[2], EC_P); const zi2 = zi * zi % EC_P; return [pt[0] * zi2 % EC_P, pt[1] * zi2 % EC_P * zi % EC_P]; }
+function aBytes_(n, len) { const out = []; for (let i = len - 1; i >= 0; i--) out[i] = Number((n >> BigInt(8 * (len - 1 - i))) & 255n); return out; }
+function deBytes_(b) { let n = 0n; for (const x of b) n = (n << 8n) + BigInt((x + 256) % 256); return n; }
+const b64u_ = (bytes) => Utilities.base64EncodeWebSafe(bytes.map((x) => (x > 127 ? x - 256 : x))).replace(/=+$/, '');
+function azar_() {
+  const semilla = Utilities.getUuid() + Utilities.getUuid() + Utilities.getUuid() + Date.now() + Math.random();
+  return md_(deBytes_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, semilla)), EC_N - 1n) + 1n;
+}
+function generarClaves_() {
+  const d = azar_();
+  const [x, y] = afin_(mul_(d, EC_G));
+  return { priv: d.toString(16), pub: b64u_([4].concat(aBytes_(x, 32), aBytes_(y, 32))) };
+}
+function firmarJwt_(aud, privHex) {
+  const enc = (o) => b64u_(Utilities.newBlob(JSON.stringify(o)).getBytes().map((x) => (x + 256) % 256));
+  const datos = enc({ typ: 'JWT', alg: 'ES256' }) + '.' + enc({ aud: aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: CONTACTO });
+  const e = deBytes_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, datos));
+  const d = BigInt('0x' + privHex);
+  for (;;) {
+    const k = azar_();
+    const r = md_(afin_(mul_(k, EC_G))[0], EC_N);
+    if (!r) continue;
+    const s = md_(inv_(k, EC_N) * (e + r * d), EC_N);
+    if (!s) continue;
+    return datos + '.' + b64u_(aBytes_(r, 32).concat(aBytes_(s, 32)));
+  }
 }

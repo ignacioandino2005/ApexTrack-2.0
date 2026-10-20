@@ -36,7 +36,7 @@ const ctx = {
   Date, JSON, Math, Number, String, Object, Set, Array,
 };
 vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(path.resolve('../server/comunidad.gs'), 'utf8'), ctx);
+vm.runInContext(fs.readFileSync(new URL('../../server/comunidad.gs', import.meta.url), 'utf8'), ctx);
 
 // --- aportes armados por el teléfono (mismo código que usa la app) ---
 const { recordsFromDraft } = await import('../../js/community.js');

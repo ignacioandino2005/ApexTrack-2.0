@@ -2,8 +2,9 @@
 
 import { todayISO, uid, addDays, dateRange, weekStart, round1, round0, deepClone, isISODate, norm, parseISO, daysBetween } from './util.js';
 import { setCustomFoods, calc, getFood, foodUnits, unitLabel, canonUnit, sanitizePer100 } from './foods.js';
+import { defaultReminders } from './reminders-core.js';
 
-export const APP_VERSION = '2.4.0';
+export const APP_VERSION = '2.5.0';
 const SCHEMA = 1;
 const DB_NAME = 'apextrack';
 const DB_STORE = 'kv';
@@ -266,6 +267,10 @@ export function migrate(d) {
   for (const k of ['entries', 'body', 'customFoods', 'pending', 'aiLog', 'insights']) if (!Array.isArray(out[k])) out[k] = [];
   if (!out.days || typeof out.days !== 'object') out.days = {};
   if (!out.usage) out.usage = {};
+  if (!out.settings.reminders || !Array.isArray(out.settings.reminders.list)) out.settings.reminders = { on: false, push: false, list: defaultReminders() };
+  if (!out.settings.weekly || typeof out.settings.weekly !== 'object') out.settings.weekly = { day: 1, ai: true };
+  if (!out.settings.goals.steps) out.settings.goals.steps = 8000;
+  if (!Array.isArray(out.weekly)) out.weekly = [];
   out.schema = SCHEMA;
   out.version = APP_VERSION;
   return out;

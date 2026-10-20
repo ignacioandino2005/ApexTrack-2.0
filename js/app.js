@@ -13,10 +13,13 @@ import {
   openSheet, toast, confirmDialog, pickOption, pickDate, promptText, formSheet, setRootBack, setBusy, sheetsOpen, closeAllSheets,
 } from './ui.js';
 import { canDictate, canRecord, startDictation, startRecording } from './voice.js';
-import { pickImage, scanBarcode, lookupBarcode, canScan } from './camera.js';
+import { pickImage, scanBarcode, lookupBarcode, canScan, shrink } from './camera.js';
 import { renderDiario, renderProgreso, renderGym, openSettings, gymTimerTick, wireCharts, maybeBackupReminder, moreActions, maybeOnboard } from './more.js';
 import { renderEstudio, renderHabitos } from './study.js';
 import * as EN from './energy.js';
+import { renderActividad, renderAgua, tabActions } from './tabs.js';
+import { maybeAutoWeekly, weeklyCard, pendingWeekly, openWeekly, askWeekly } from './weekly.js';
+import { startReminders } from './notify.js';
 import { scheduleCloud, cloudPush } from './backup.js';
 import * as CM from './community.js';
 
@@ -34,14 +37,30 @@ export const ui = {
   online: navigator.onLine !== false,
   jobs: [], // análisis que siguen en segundo plano
 };
-const TABS = ['hoy', 'diario', 'gym', 'estudio', 'habitos', 'progreso'];
-export const SLOT_TABS = { gym: ['Gym', 'dumbbell'], estudio: ['Estudio', 'book'], habitos: ['Hábitos', 'check'] };
+const TABS = ['hoy', 'diario', 'gym', 'estudio', 'habitos', 'actividad', 'agua', 'progreso'];
+export const SLOT_TABS = { gym: ['Gym', 'dumbbell'], estudio: ['Estudio', 'book'], habitos: ['Hábitos', 'check'], actividad: ['Actividad', 'walk'], agua: ['Agua', 'drop'] };
 function slotTab() { const t = store.S().settings.ui.slotTab; return SLOT_TABS[t] ? t : 'gym'; }
 function paintSlot() {
   const b = document.querySelector('.tab[data-slot]');
   if (!b) return;
-  const t = slotTab();
+  // si se está viendo otra pestaña personalizable (elegida con la flechita), el botón la muestra
+  const t = SLOT_TABS[ui.tab] ? ui.tab : slotTab();
   if (b.dataset.tab !== t) { b.dataset.tab = t; b.innerHTML = `${icon(SLOT_TABS[t][1], 24)}${SLOT_TABS[t][0]}`; }
+}
+
+// Flechita sobre la pestaña personalizable: despliega las demás sin pasar por Ajustes
+function slotMenu(open) {
+  let m = document.getElementById('slot-menu');
+  if (!open) { if (m) m.remove(); document.getElementById('slot-more')?.setAttribute('aria-expanded', 'false'); return; }
+  if (m) { slotMenu(false); return; }
+  const main = slotTab();
+  m = document.createElement('div');
+  m.id = 'slot-menu'; m.className = 'slot-menu'; m.setAttribute('role', 'menu');
+  m.innerHTML = Object.entries(SLOT_TABS).map(([k, [label, ic]]) => `<button role="menuitem" data-slot-go="${k}" class="${ui.tab === k ? 'on' : ''}">${icon(ic, 20)}<span>${label}</span>${k === main ? '<small>principal</small>' : ''}</button>`).join('');
+  document.querySelector('.slot-wrap').appendChild(m);
+  document.getElementById('slot-more')?.setAttribute('aria-expanded', 'true');
+  m.addEventListener('click', (e) => { const b = e.target.closest('[data-slot-go]'); if (!b) return; slotMenu(false); go(b.dataset.slotGo); });
+  setTimeout(() => document.addEventListener('click', function off(e) { if (!e.target.closest('#slot-menu') && !e.target.closest('#slot-more')) { slotMenu(false); document.removeEventListener('click', off, true); } }, true), 0);
 }
 
 export function go(tab, { push = true } = {}) {
@@ -75,6 +94,8 @@ export function render() {
   else if (ui.tab === 'progreso') html = renderProgreso();
   else if (ui.tab === 'estudio') html = renderEstudio();
   else if (ui.tab === 'habitos') html = renderHabitos();
+  else if (ui.tab === 'actividad') html = renderActividad();
+  else if (ui.tab === 'agua') html = renderAgua();
   paintSlot();
   v.innerHTML = html;
   v.dataset.tab = ui.tab;
@@ -218,7 +239,7 @@ function viewHoy() {
       ${pend}
       ${meals ? `<div class="meals">${meals}</div>` : `<div class="empty"><strong>${d === today ? 'Todavía no registraste nada hoy' : 'Sin comidas este día'}</strong>Tocá el micrófono y contá qué comiste, como en un mensaje.<div style="margin-top:14px"><button class="btn primary" data-act="log">${icon('mic', 20)} Registrar comida</button></div></div>`}
     </section>`;
-  return dateHtml + (jobs ? `<div style="margin-top:10px">${jobs}</div>` : '') + hero + macros + mealsHtml + extras;
+  return dateHtml + (d === today ? weeklyCard() : '') + (jobs ? `<div style="margin-top:10px">${jobs}</div>` : '') + hero + macros + mealsHtml + extras;
 }
 
 function mealCard(e) {
@@ -294,7 +315,18 @@ const actions = {
     store.setWater(ui.date, i < cur ? i * glass : (i + 1) * glass);
     vibrate(10); store.commit('water');
   },
-  'water-add': (el) => { store.addWater(ui.date, Number(el.dataset.ml)); vibrate(10); store.commit('water'); toast(`+${el.dataset.ml} ml de agua`, { action: 'Deshacer', onAction: () => { store.addWater(ui.date, -Number(el.dataset.ml)); store.commit('water'); } }); },
+  'water-add': (el) => {
+    const d = el.dataset.date || (ui.tab === 'agua' ? todayISO() : ui.date);
+    const ml = Number(el.dataset.ml);
+    store.addWater(d, ml); vibrate(10); store.commit('water');
+    toast(`${ml > 0 ? '+' : '−'}${Math.abs(ml)} ml de agua`, { action: 'Deshacer', onAction: () => { store.addWater(d, -ml); store.commit('water'); } });
+  },
+  'watch-shot': async () => {
+    const img = await pickImage({ gallery: true });
+    if (img) openLogger({ date: todayISO(), image: img, text: 'Captura de mi reloj / app de salud' });
+  },
+  'weekly-open': () => openWeekly(pendingWeekly()),
+  'weekly-ask': () => askWeekly(),
   'water-custom': async () => {
     const r = await formSheet({ title: 'Agua', fields: [{ key: 'ml', label: 'Cantidad para sumar', type: 'number', suffix: 'ml', value: '' }, { key: 'total', label: 'O total del día', type: 'number', suffix: 'ml', value: store.day(ui.date).water || '' }] });
     if (!r) return;
@@ -327,7 +359,7 @@ async function pickMoment(current, title = 'Comida') {
 export { pickMoment };
 
 export function registerActions(more) { Object.assign(actions, more); }
-Object.assign(actions, moreActions);
+Object.assign(actions, moreActions, tabActions);
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
@@ -355,8 +387,8 @@ document.addEventListener('click', (e) => {
 // ---------------------------------------------------------------------------
 // Registrar (texto, voz, foto, código) → IA → revisión
 // ---------------------------------------------------------------------------
-export function openLogger({ date = ui.date, moment = null, text = '', autoMic = false } = {}) {
-  const st = { date, moment: moment || (date === todayISO() ? store.momentForTime() : 'almuerzo'), text, image: null, audio: null, dict: null, rec: null, busy: false, draft: null, abort: false };
+export function openLogger({ date = ui.date, moment = null, text = '', autoMic = false, image = null } = {}) {
+  const st = { date, moment: moment || (date === todayISO() ? store.momentForTime() : 'almuerzo'), text, image, audio: null, dict: null, rec: null, busy: false, draft: null, abort: false };
   const s = openSheet({ title: 'Registrar', full: true, body: '<div class="logger"></div>', footer: '', onClose: () => { stopVoice(st); if (st.busy) toBackground(st); else st.abort = true; } });
   st.sheet = s;
   renderComposer(st);
@@ -1152,6 +1184,7 @@ async function boot() {
   store.onChange(() => { if (ui.tab) render(); });
   history.replaceState({ tab: 'hoy' }, '');
   render();
+  document.getElementById('slot-more')?.addEventListener('click', (e) => { e.stopPropagation(); slotMenu(true); });
   document.getElementById('tab-rec').addEventListener('click', () => openLogger({ date: ui.tab === 'hoy' ? ui.date : todayISO() }));
   document.querySelectorAll('.tab[data-tab]').forEach((b) => b.addEventListener('click', () => go(b.dataset.tab)));
   window.addEventListener('online', () => { ui.online = true; render(); if (store.S().pending.length) toast(`Volvió la conexión: ${store.S().pending.length} registro(s) para analizar`, { action: 'Analizar', onAction: runPending, ms: 6000 }); });
@@ -1160,18 +1193,21 @@ async function boot() {
   window.addEventListener('pagehide', () => store.flush());
   setInterval(() => { checkDayRollover(); gymTimerTick(); }, 1000);
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
-  // accesos directos del ícono (manifest shortcuts)
+  // accesos directos del ícono, notificaciones y capturas compartidas
   const p = new URLSearchParams(location.search);
-  if (p.get('accion') === 'registrar') setTimeout(() => openLogger({ autoMic: false }), 200);
-  if (p.get('accion') === 'agua') { store.addWater(todayISO(), store.S().settings.ui.glassMl || 250); store.commit('water'); toast('+1 vaso de agua'); }
-  if (p.get('accion')) history.replaceState({ tab: 'hoy' }, '', location.pathname);
+  if (p.get('accion')) { setTimeout(() => handleAction(p), 200); history.replaceState({ tab: 'hoy' }, '', location.pathname); }
+  navigator.serviceWorker?.addEventListener('message', (e) => {
+    if (e.data?.type === 'abrir' && e.data.url) { const u = new URL(e.data.url); if (u.searchParams.get('accion')) handleAction(u.searchParams); }
+  });
   if (store.state.recovered) toast(`Recuperé tus datos desde la copia guardada en ${store.state.recovered}`, { ms: 6000 });
   scheduleCloud();
   CM.startCommunity();
+  startReminders();
+  try { if (maybeAutoWeekly()) render(); } catch (e) { console.warn('resumen semanal', e); }
   maybeBackupReminder();
   maybeOnboard();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('./sw.js').then((reg) => {
+    navigator.serviceWorker.register('./sw.js', { type: 'module' }).then((reg) => {
       reg.addEventListener('updatefound', () => {
         const nw = reg.installing;
         nw?.addEventListener('statechange', () => {
@@ -1185,6 +1221,33 @@ async function boot() {
     navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded) { reloaded = true; location.reload(); } });
   }
   window.__apex = { store, AI, CM, ui, render, openLogger, cloudPush };
+}
+
+/** Acciones que llegan por la dirección (?accion=…): accesos del ícono, notificaciones y compartir. */
+async function handleAction(p) {
+  const a = p.get('accion');
+  const today = todayISO();
+  closeAllSheets();
+  if (a === 'registrar') openLogger({ date: today, moment: p.get('momento') || null, autoMic: p.get('voz') === '1' });
+  else if (a === 'agua') { const ml = store.S().settings.ui.glassMl || 250; store.addWater(today, ml); store.commit('water'); toast(`+1 vaso de agua (${ml} ml)`, { action: 'Deshacer', onAction: () => { store.addWater(today, -ml); store.commit('water'); } }); }
+  else if (a === 'habito') {
+    const id = p.get('id'); const h = store.habitsList().find((x) => x.id === id);
+    if (h && p.get('hecho') === '1') { if (!store.day(today).habits?.[id]) store.toggleHabit(today, id); store.commit('habit'); toast(`${h.name}: hecho`); }
+    ui.tab = 'hoy'; setDate(today);
+  } else if (a === 'peso') { ui.tab = 'hoy'; setDate(today); actions.weight(); }
+  else if (a === 'gym' || a === 'estudio') { ui.tab = a === 'gym' ? 'hoy' : 'estudio'; setDate(today); }
+  else if (a === 'resumen') { const r = pendingWeekly(); if (r) openWeekly(r); else askWeekly('pasada'); }
+  else if (a === 'compartir') {
+    try {
+      const c = await caches.open('apextrack-compartido');
+      const txt = await (await c.match('./__compartido_texto'))?.text() || '';
+      const imgRes = await c.match('./__compartido_imagen');
+      let image = null;
+      if (imgRes) image = await shrink(await imgRes.blob());
+      await c.delete('./__compartido_texto'); await c.delete('./__compartido_imagen');
+      openLogger({ date: today, image, text: txt.trim() || (image ? 'Captura compartida' : '') });
+    } catch { openLogger({ date: today }); }
+  }
 }
 
 boot();

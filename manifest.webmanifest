@@ -10,14 +10,93 @@
   "orientation": "portrait",
   "background_color": "#EEF1EC",
   "theme_color": "#EEF1EC",
-  "categories": ["health", "fitness", "food"],
+  "categories": [
+    "health",
+    "fitness",
+    "food"
+  ],
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ],
   "shortcuts": [
-    { "name": "Registrar comida", "short_name": "Registrar", "url": "./?accion=registrar", "icons": [{ "src": "icons/sc-rec.png", "sizes": "96x96" }] },
-    { "name": "Sumar un vaso de agua", "short_name": "Agua", "url": "./?accion=agua", "icons": [{ "src": "icons/sc-agua.png", "sizes": "96x96" }] }
-  ]
+    {
+      "name": "Dictar lo que comí",
+      "short_name": "Dictar",
+      "url": "./?accion=registrar&voz=1",
+      "icons": [
+        {
+          "src": "icons/sc-rec.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Registrar comida",
+      "short_name": "Registrar",
+      "url": "./?accion=registrar",
+      "icons": [
+        {
+          "src": "icons/sc-rec.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Sumar un vaso de agua",
+      "short_name": "+1 vaso",
+      "url": "./?accion=agua",
+      "icons": [
+        {
+          "src": "icons/sc-agua.png",
+          "sizes": "96x96"
+        }
+      ]
+    },
+    {
+      "name": "Resumen semanal",
+      "short_name": "Semana",
+      "url": "./?accion=resumen",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "share_target": {
+    "action": "./compartir",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "imagen",
+          "accept": [
+            "image/*"
+          ]
+        }
+      ]
+    }
+  }
 }

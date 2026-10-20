@@ -115,6 +115,11 @@ export function addActivity(date, a) {
   d.activity = d.activity || [];
   const item = { id: uid('ac'), type: ACTS[a.type] ? a.type : 'otro', min: Number(a.min) || 0, km: Number(a.km) || 0, steps: Number(a.steps) || 0, note: a.note || '' };
   if (a.kcal && a.manual) { item.kcal = round0(a.kcal); item.manual = true; }
+  if (a.source) {
+    item.source = a.source;
+    // una captura nueva del reloj reemplaza a la anterior del mismo día (los totales del reloj se acumulan)
+    if (a.source === 'reloj') d.activity = d.activity.filter((x) => x.source !== 'reloj' && x.source !== 'pasos');
+  }
   d.activity.push(item);
   return item;
 }
@@ -128,6 +133,7 @@ export function describeAct(a) {
   if (a.min) parts.push(`${a.min} min`);
   if (a.km) parts.push(`${round1(a.km)} km`);
   if (a.steps) parts.push(`${Number(a.steps).toLocaleString('es-AR')} pasos`);
-  return `${t.label}${parts.length ? ' · ' + parts.join(' · ') : ''}${a.note ? ' · ' + a.note : ''}`;
+  if (a.manual && a.kcal) parts.push(`${round0(a.kcal)} kcal medidas`);
+  return `${a.source === 'reloj' ? 'Reloj' : t.label}${parts.length ? ' · ' + parts.join(' · ') : ''}${a.note && a.note !== 'reloj' ? ' · ' + a.note : ''}`;
 }
 export { parseISO };

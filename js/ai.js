@@ -66,6 +66,7 @@ export const SYSTEM_PROMPT = `Sos el motor de registro nutricional de ApexTrack,
 5) AUDIO E IMÁGENES
 - Si llega audio, escribí lo que dijo en transcript y analizalo igual que un texto.
 - Si llega la foto de un plato, estimá las porciones por lo que se ve; si es una tabla nutricional, copiá sus valores por 100 g.
+- Si la imagen es una captura de un reloj inteligente o de una app de salud (Samsung Health, Mi Fitness, Zepp, Google Fit, Huawei Health): NO es comida. Registrá en activity lo que muestre: pasos (steps), distancia (km), minutos de actividad (minutes) y calorías ACTIVAS o de ejercicio (kcal; si solo figuran las calorías totales del día, no las uses), con from_device true y la fecha que se ve (si no se ve, la fecha por defecto). Si muestra un entrenamiento puntual (correr, bici, caminata), usá ese type con sus datos.
 
 EJEMPLO
 Contexto: hoy = 2026-03-12 (jue), ayer = 2026-03-11, 1 vaso = 250 ml.
@@ -132,7 +133,7 @@ export const RESPONSE_SCHEMA = {
     habits: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, habit: { type: 'string' }, done: { type: 'boolean' } }, required: ['date', 'habit', 'done'] } },
     gym: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, status: { type: 'string', enum: ['fui', 'no_fui', 'descanso'] }, detail: { type: ['string', 'null'] } }, required: ['date', 'status'] } },
     weight: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, kg: { type: 'number' } }, required: ['date', 'kg'] } },
-    activity: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, type: { type: 'string', enum: ['caminata', 'caminata_rapida', 'correr', 'bici', 'natacion', 'futbol', 'tenis', 'baile', 'eliptico', 'yoga', 'pesas', 'otro'] }, minutes: { type: ['number', 'null'] }, km: { type: ['number', 'null'] }, steps: { type: ['number', 'null'] }, detail: { type: ['string', 'null'] } }, required: ['date', 'type'] } },
+    activity: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, type: { type: 'string', enum: ['caminata', 'caminata_rapida', 'correr', 'bici', 'natacion', 'futbol', 'tenis', 'baile', 'eliptico', 'yoga', 'pesas', 'otro'] }, minutes: { type: ['number', 'null'] }, km: { type: ['number', 'null'] }, steps: { type: ['number', 'null'] }, kcal: { type: ['number', 'null'], description: 'Calorías activas medidas por el reloj' }, from_device: { type: 'boolean' }, detail: { type: ['string', 'null'] } }, required: ['date', 'type'] } },
     study: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, hours: { type: 'number' } }, required: ['date', 'hours'] } },
     skipped: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, moment: { type: 'string' } }, required: ['date', 'moment'] } },
     questions: { type: 'array', items: { type: 'string' } },
@@ -863,9 +864,12 @@ export function normalizeDraft(raw0, ctx, meta = {}) {
   const ACT_TYPES = ['caminata', 'caminata_rapida', 'correr', 'bici', 'natacion', 'futbol', 'tenis', 'baile', 'eliptico', 'yoga', 'pesas', 'otro'];
   const activity = [];
   for (const a of Array.isArray(raw?.activity) ? raw.activity : []) {
-    const min = num(pick(a, 'minutes', 'min')); const km = num(a.km); const steps = num(pick(a, 'steps', 'pasos'));
-    if (!(min > 0) && !(km > 0) && !(steps > 0)) continue;
-    activity.push({ date: fixDate(a.date), type: ACT_TYPES.includes(a.type) ? a.type : 'otro', min: min > 0 && min <= 600 ? Math.round(min) : 0, km: km > 0 && km <= 100 ? round1(km) : 0, steps: steps > 0 && steps <= 100000 ? Math.round(steps) : 0, note: a.detail ? String(a.detail).slice(0, 60) : '' });
+    const min = num(pick(a, 'minutes', 'min')); const km = num(a.km); const steps = num(pick(a, 'steps', 'pasos')); const kcal = num(a.kcal);
+    if (!(min > 0) && !(km > 0) && !(steps > 0) && !(kcal > 0)) continue;
+    const rec = { date: fixDate(a.date), type: ACT_TYPES.includes(a.type) ? a.type : 'otro', min: min > 0 && min <= 600 ? Math.round(min) : 0, km: km > 0 && km <= 100 ? round1(km) : 0, steps: steps > 0 && steps <= 100000 ? Math.round(steps) : 0, note: a.detail ? String(a.detail).slice(0, 60) : '' };
+    if (kcal > 0 && kcal <= 5000) { rec.kcal = Math.round(kcal); rec.manual = true; }
+    if (a.from_device) { rec.source = 'reloj'; if (!rec.note) rec.note = 'reloj'; }
+    activity.push(rec);
   }
   const skipped = [];
   for (const s of Array.isArray(raw?.skipped) ? raw.skipped : []) skipped.push({ date: fixDate(s.date), moment: fixMoment(s.moment) });

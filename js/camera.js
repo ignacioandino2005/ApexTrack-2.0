@@ -4,10 +4,11 @@ import { icon } from './icons.js';
 import { round1 } from './util.js';
 
 /** Abre la cámara o la galería y devuelve la imagen reducida (JPEG). */
-export function pickImage() {
+export function pickImage({ gallery = false } = {}) {
   return new Promise((resolve) => {
     const inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = 'image/*'; inp.setAttribute('capture', 'environment');
+    inp.type = 'file'; inp.accept = 'image/*';
+    if (!gallery) inp.setAttribute('capture', 'environment');
     inp.style.display = 'none';
     document.body.appendChild(inp);
     inp.onchange = async () => {
@@ -22,7 +23,7 @@ export function pickImage() {
   });
 }
 
-async function shrink(file, max = 1280, q = 0.82) {
+export async function shrink(file, max = 1280, q = 0.82) {
   const url = URL.createObjectURL(file);
   const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
   const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
