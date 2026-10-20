@@ -4,7 +4,7 @@
 // ID de cliente OAuth de Google (tipo "Aplicación web"), con el origen https://ignacioandino2005.github.io
 // autorizado y la API de Google Drive habilitada. Permiso pedido: drive.file (la app solo ve los
 // archivos que ella misma crea, en la carpeta "ApexTrack copias"). Pasos en dev/SERVIDOR.md.
-export const GOOGLE_CLIENT_ID = '';
+export const GOOGLE_CLIENT_ID = '22303629060-lmfad0ltpmcqgacv2kd0l1pd31n1j48c.apps.googleusercontent.com';
 
 // Dirección del servicio de aprendizaje compartido (Apps Script del desarrollador, server/comunidad.gs).
 // Recibe aportes anónimos de comidas analizadas por la IA y devuelve el conocimiento acumulado.
