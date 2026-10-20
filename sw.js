@@ -1,9 +1,9 @@
 // ApexTrack — service worker: funciona sin conexión y se actualiza solo.
-const VERSION = 'apextrack-2.2.0';
+const VERSION = 'apextrack-2.3.0';
 const CORE = [
   './', './index.html', './manifest.webmanifest', './css/app.css', './fonts/archivo.woff2',
   './js/app.js', './js/more.js', './js/store.js', './js/foods.js', './js/ai.js', './js/ui.js', './js/util.js',
-  './js/icons.js', './js/charts.js', './js/study.js', './js/energy.js', './js/profile.js', './js/insights.js', './js/voice.js', './js/camera.js', './js/excel.js',
+  './js/icons.js', './js/charts.js', './js/study.js', './js/energy.js', './js/profile.js', './js/insights.js', './js/backup.js', './js/voice.js', './js/camera.js', './js/excel.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png',
 ];
 const LAZY = ['./vendor/exceljs.min.js'];

@@ -17,6 +17,7 @@ import { pickImage, scanBarcode, lookupBarcode, canScan } from './camera.js';
 import { renderDiario, renderProgreso, renderGym, openSettings, gymTimerTick, wireCharts, maybeBackupReminder, moreActions, maybeOnboard } from './more.js';
 import { renderEstudio, renderHabitos } from './study.js';
 import * as EN from './energy.js';
+import { scheduleCloud } from './backup.js';
 
 // ---------------------------------------------------------------------------
 // Estado de la interfaz
@@ -1138,7 +1139,7 @@ async function boot() {
   document.querySelectorAll('.tab[data-tab]').forEach((b) => b.addEventListener('click', () => go(b.dataset.tab)));
   window.addEventListener('online', () => { ui.online = true; render(); if (store.S().pending.length) toast(`Volvió la conexión: ${store.S().pending.length} registro(s) para analizar`, { action: 'Analizar', onAction: runPending, ms: 6000 }); });
   window.addEventListener('offline', () => { ui.online = false; render(); });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') store.flush(); else checkDayRollover(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') store.flush(); else { checkDayRollover(); store.dailySnapshot(); } });
   window.addEventListener('pagehide', () => store.flush());
   setInterval(() => { checkDayRollover(); gymTimerTick(); }, 1000);
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
@@ -1147,6 +1148,8 @@ async function boot() {
   if (p.get('accion') === 'registrar') setTimeout(() => openLogger({ autoMic: false }), 200);
   if (p.get('accion') === 'agua') { store.addWater(todayISO(), store.S().settings.ui.glassMl || 250); store.commit('water'); toast('+1 vaso de agua'); }
   if (p.get('accion')) history.replaceState({ tab: 'hoy' }, '', location.pathname);
+  if (store.state.recovered) toast(`Recuperé tus datos desde la copia guardada en ${store.state.recovered}`, { ms: 6000 });
+  scheduleCloud();
   maybeBackupReminder();
   maybeOnboard();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {

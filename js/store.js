@@ -3,7 +3,7 @@
 import { todayISO, uid, addDays, dateRange, weekStart, round1, round0, deepClone, isISODate, norm, parseISO, daysBetween } from './util.js';
 import { setCustomFoods, calc, getFood, foodUnits, unitLabel, canonUnit, sanitizePer100 } from './foods.js';
 
-export const APP_VERSION = '2.2.0';
+export const APP_VERSION = '2.3.0';
 const SCHEMA = 1;
 const DB_NAME = 'apextrack';
 const DB_STORE = 'kv';
@@ -55,7 +55,7 @@ export function defaultState() {
       habits: deepClone(DEFAULT_HABITS),
       ai: { key: '', model: 'auto', precision: 'equilibrada', web: false, webV2: true, notes: '', endpoint: '', resolvedModel: '', modelsAt: 0, models: [] },
       ui: { theme: 'auto', glassMl: 250, slotTab: 'gym' },
-      backup: { lastAt: 0 },
+      backup: { lastAt: 0, cloudUrl: '', cloudToken: '', lastCloudAt: 0, lastCloudError: '' },
     },
     entries: [],
     days: {},
@@ -72,7 +72,11 @@ export function defaultState() {
 }
 
 // ---------- Persistencia ----------
+// Los datos se guardan en TRES lugares del navegador a la vez (IndexedDB, localStorage y un archivo
+// interno OPFS) y además se guarda una foto diaria. Al abrir se usa la copia más completa y reciente,
+// y nunca se pisa una copia con datos con un estado vacío.
 let db = null;
+let idbFailed = false;
 function openDB() {
   return new Promise((resolve) => {
     try {
@@ -80,9 +84,9 @@ function openDB() {
       const req = indexedDB.open(DB_NAME, 1);
       req.onupgradeneeded = () => { req.result.createObjectStore(DB_STORE); };
       req.onsuccess = () => resolve(req.result);
-      req.onerror = () => resolve(null);
-      req.onblocked = () => resolve(null);
-    } catch { resolve(null); }
+      req.onerror = () => { idbFailed = true; resolve(null); };
+      req.onblocked = () => { idbFailed = true; resolve(null); };
+    } catch { idbFailed = true; resolve(null); }
   });
 }
 function idbGet(key) {
@@ -92,8 +96,8 @@ function idbGet(key) {
       const tx = db.transaction(DB_STORE, 'readonly');
       const r = tx.objectStore(DB_STORE).get(key);
       r.onsuccess = () => resolve(r.result);
-      r.onerror = () => resolve(undefined);
-    } catch { resolve(undefined); }
+      r.onerror = () => { idbFailed = true; resolve(undefined); };
+    } catch { idbFailed = true; resolve(undefined); }
   });
 }
 function idbSet(key, val) {
@@ -107,32 +111,91 @@ function idbSet(key, val) {
     } catch { resolve(false); }
   });
 }
+// archivo interno del navegador (Origin Private File System)
+async function opfsDir() {
+  try { if (navigator.storage?.getDirectory) return await navigator.storage.getDirectory(); } catch { /* sin OPFS */ }
+  return null;
+}
+async function opfsRead(name) {
+  try { const d = await opfsDir(); if (!d) return null; const fh = await d.getFileHandle(name); const f = await fh.getFile(); return JSON.parse(await f.text()); } catch { return null; }
+}
+async function opfsWrite(name, obj) {
+  try {
+    const d = await opfsDir(); if (!d) return false;
+    const fh = await d.getFileHandle(name, { create: true });
+    if (!fh.createWritable) return false;
+    const w = await fh.createWritable(); await w.write(JSON.stringify(obj)); await w.close();
+    return true;
+  } catch { return false; }
+}
+async function opfsList() {
+  const out = [];
+  try { const d = await opfsDir(); if (!d) return out; for await (const [name] of d.entries()) out.push(name); } catch { /* */ }
+  return out;
+}
+async function opfsDelete(name) { try { const d = await opfsDir(); await d?.removeEntry(name); } catch { /* */ } }
 
-export const state = { data: defaultState(), ready: false, listeners: new Set(), storage: 'memoria' };
+/** Cuánto "pesa" un estado: para elegir la mejor copia y no pisar datos con un estado vacío. */
+export function richness(d) {
+  if (!d || typeof d !== 'object') return 0;
+  return (Array.isArray(d.entries) ? d.entries.reduce((n, e) => n + ((e.items || []).length || 0), 0) : 0)
+    + (Array.isArray(d.body) ? d.body.length : 0) + Object.keys(d.days || {}).length
+    + ((d.gym?.sessions || []).length) + ((d.study?.sessions || []).length);
+}
+
+export const state = { data: defaultState(), ready: false, listeners: new Set(), storage: 'memoria', recovered: null, guardRichness: 0, allowShrink: false, persisted: null };
 
 export async function loadState() {
   db = await openDB();
-  let saved = await idbGet(KEY);
-  if (saved) state.storage = 'IndexedDB';
-  if (!saved) {
-    try { const ls = localStorage.getItem(LS_KEY); if (ls) { saved = JSON.parse(ls); state.storage = 'localStorage'; } } catch { /* sin acceso */ }
-  }
-  state.data = migrate(saved || defaultState());
-  if (db) state.storage = 'IndexedDB';
+  const cands = [];
+  const fromIdb = await idbGet(KEY);
+  if (fromIdb) cands.push({ src: 'IndexedDB', d: fromIdb });
+  try { const ls = localStorage.getItem(LS_KEY); if (ls) cands.push({ src: 'localStorage', d: JSON.parse(ls) }); } catch { /* sin acceso */ }
+  const fromFile = await opfsRead('state.json');
+  if (fromFile) cands.push({ src: 'archivo interno', d: fromFile });
+  // la copia más completa; a igual contenido, la más reciente
+  cands.sort((a, b) => richness(b.d) - richness(a.d) || (b.d.updatedAt || 0) - (a.d.updatedAt || 0));
+  let best = cands[0] || null;
+  // si alguna copia es más nueva y casi igual de completa, se prefiere esa
+  for (const c of cands) if (best && c !== best && (c.d.updatedAt || 0) > (best.d.updatedAt || 0) && richness(c.d) >= richness(best.d) * 0.98) best = c;
+  state.data = migrate(best ? best.d : defaultState());
+  state.storage = db ? 'IndexedDB' : best ? best.src : 'memoria';
+  if (best && best.src !== 'IndexedDB' && richness(best.d) > richness(fromIdb)) state.recovered = best.src;
+  state.guardRichness = richness(state.data);
   syncFoods();
   state.ready = true;
-  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch { /* opcional */ }
+  try {
+    if (navigator.storage?.persist) {
+      state.persisted = await navigator.storage.persisted?.();
+      if (!state.persisted) state.persisted = await navigator.storage.persist();
+    }
+  } catch { /* opcional */ }
+  if (state.recovered) save(true);
+  dailySnapshot();
   return state.data;
 }
 
 let saveTimer = null;
+let lastMirror = 0;
+let lastSnap = 0;
 export function save(immediate = false) {
   state.data.updatedAt = Date.now();
   clearTimeout(saveTimer);
   const run = async () => {
     const snapshot = state.data;
-    const ok = await idbSet(KEY, snapshot);
-    if (!ok) { try { localStorage.setItem(LS_KEY, JSON.stringify(snapshot)); } catch { /* lleno o bloqueado */ } }
+    const r = richness(snapshot);
+    // protección: nunca reemplazar datos guardados por un estado vacío o casi vacío sin querer
+    if (!state.allowShrink && state.guardRichness >= 10 && r < state.guardRichness * 0.5) {
+      console.warn('ApexTrack: se evitó pisar los datos guardados con un estado casi vacío', r, state.guardRichness);
+      return;
+    }
+    state.guardRichness = Math.max(r, state.allowShrink ? 0 : state.guardRichness * 0.5);
+    if (state.allowShrink) { state.guardRichness = r; state.allowShrink = false; }
+    await idbSet(KEY, snapshot);
+    try { localStorage.setItem(LS_KEY, JSON.stringify(snapshot)); } catch { /* lleno o bloqueado */ }
+    // el archivo interno se actualiza como mucho cada 20 s (o al cerrar)
+    if (immediate || Date.now() - lastMirror > 20000) { lastMirror = Date.now(); await opfsWrite('state.json', snapshot); }
+    if (Date.now() - lastSnap > 30 * 60000 || immediate) { lastSnap = Date.now(); dailySnapshot(); }
   };
   if (immediate) return run();
   saveTimer = setTimeout(run, 250);
@@ -140,6 +203,25 @@ export function save(immediate = false) {
 }
 /** Guarda ya (al pasar la app a segundo plano). */
 export function flush() { return save(true); }
+
+// ---------- Fotos diarias (se guardan las últimas 4) ----------
+export async function dailySnapshot() {
+  try {
+    if (richness(state.data) < 3) return;
+    const name = `snap-${todayISO()}.json`;
+    await opfsWrite(name, state.data);
+    const snaps = (await opfsList()).filter((n) => /^snap-\d{4}-\d{2}-\d{2}\.json$/.test(n)).sort();
+    for (const old of snaps.slice(0, Math.max(0, snaps.length - 4))) await opfsDelete(old);
+  } catch { /* opcional */ }
+}
+export async function listSnapshots() {
+  const names = (await opfsList()).filter((n) => /^snap-\d{4}-\d{2}-\d{2}\.json$/.test(n)).sort().reverse();
+  const out = [];
+  for (const n of names) { const d = await opfsRead(n); if (d) out.push({ name: n, date: n.slice(5, 15), richness: richness(d), entries: (d.entries || []).length, updatedAt: d.updatedAt || 0, data: d }); }
+  return out;
+}
+/** Para reemplazos intencionales (restaurar una copia, borrar todo). */
+export function allowShrinkOnce() { state.allowShrink = true; }
 
 export function onChange(fn) { state.listeners.add(fn); return () => state.listeners.delete(fn); }
 export function commit(reason = '') {
@@ -591,11 +673,13 @@ export function dayLabelStats(date) {
 }
 
 export function resetAll() {
+  state.allowShrink = true;
   state.data = defaultState();
   syncFoods();
 }
 
 export function replaceAll(data) {
+  state.allowShrink = true;
   state.data = migrate(data);
   syncFoods();
 }

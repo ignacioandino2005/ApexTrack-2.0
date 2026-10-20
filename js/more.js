@@ -14,6 +14,7 @@ import { studyActions, studyTick } from './study.js';
 import * as EN from './energy.js';
 import { openGoals } from './profile.js';
 import { insightsCard, openInsights, openInsight } from './insights.js';
+import * as BK from './backup.js';
 
 const METRICS = {
   kcal: { label: 'Kcal', unit: 'kcal', dec: 0, goal: (g) => g.kcal, val: (d) => store.dayTotals(d).kcal },
@@ -506,13 +507,15 @@ export function openSettings(section = null) {
       ${row('backup', 'file', 'Copia de seguridad', S.settings.backup.lastAt ? `Última: ${relativeDayLabel(isoFromTs(S.settings.backup.lastAt)).toLowerCase()}` : 'Nunca hiciste una copia')}
       ${row('restore', 'upload', 'Restaurar copia', 'Desde un archivo .json de ApexTrack')}
       ${row('import', 'upload', 'Importar planilla anterior', 'El Excel o Google Sheets de la versión 1')}
+      ${row('cloud', 'upload', 'Copia automática en Google Drive', S.settings.backup.cloudUrl ? (S.settings.backup.lastCloudError ? `<span class="bad">Error: ${esc(S.settings.backup.lastCloudError)}</span>` : S.settings.backup.lastCloudAt ? `Activa · última ${esc(new Date(S.settings.backup.lastCloudAt).toLocaleString('es-AR', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }))}` : 'Configurada, todavía sin subir') : 'Recomendado: una copia diaria fuera del teléfono', S.settings.backup.cloudUrl ? '' : '<span class="bad">Activar</span>')}
+      ${row('recover', 'undo', 'Recuperar datos', 'Desde Drive, las copias diarias internas o un archivo')}
       ${row('borrar', 'trash', 'Borrar todos los datos', '')}
     </div>
     <div class="set-group"><h3>Compartir</h3>
       ${row('share', 'send', 'Compartir la app', 'Cada persona usa su propio teléfono, sus datos y su clave')}
     </div>
     <div class="set-group"><h3>Acerca de</h3>
-      <div class="set-row-btn" style="cursor:default">${icon('info', 22)}<span class="grow">ApexTrack ${store.APP_VERSION}<small>Datos guardados solo en este teléfono (${esc(store.state.storage)}). ${store.S().entries.length} comidas registradas.</small></span></div>
+      <div class="set-row-btn" style="cursor:default">${icon('info', 22)}<span class="grow">ApexTrack ${store.APP_VERSION}<small>Datos en este teléfono, en 3 lugares + copia diaria interna${store.state.persisted ? ' · almacenamiento protegido' : ' · el navegador podría borrarlos si falta espacio: activá la copia en Drive'}. ${store.S().entries.length} comidas registradas.</small></span></div>
     </div>`;
   const s = openSheet({ title: 'Ajustes', full: true, body: draw() });
   settingsSheet = s;
@@ -539,6 +542,8 @@ export function openSettings(section = null) {
     else if (k === 'restore') restoreFlow();
     else if (k === 'import') importFlow();
     else if (k === 'borrar') wipeFlow();
+    else if (k === 'cloud') openCloudSetup();
+    else if (k === 'recover') openRecover();
     else if (k === 'share') shareApp();
     else if (k === 'slot') {
       const v = await pickOption({ title: 'Pestaña personalizable', value: S.settings.ui.slotTab || 'gym', options: [
@@ -899,13 +904,8 @@ async function restoreFlow() {
   try {
     const X = await import('./excel.js');
     const data = await X.readBackup(f);
-    const n = data.entries.length;
-    if (!(await confirmDialog({ title: '¿Restaurar esta copia?', text: `Tiene ${n} comidas registradas. Reemplaza todo lo que hay ahora en la app (tu clave de IA se mantiene).`, ok: 'Restaurar', danger: true }))) return;
-    const key = store.S().settings.ai.key;
-    store.replaceAll(data);
-    if (!store.S().settings.ai.key) store.S().settings.ai.key = key;
-    store.commit('restore'); applyTheme();
-    toast('Copia restaurada');
+    if (!(await confirmDialog({ title: '¿Restaurar esta copia?', text: `${BK.describe(data)}. Reemplaza todo lo que hay ahora en la app (tu clave de IA se mantiene).`, ok: 'Restaurar', danger: true }))) return;
+    restoreData(data, 'archivo');
   } catch (err) { toast(err.message || 'Archivo no válido', { kind: 'error' }); }
 }
 
@@ -1093,7 +1093,22 @@ export async function maybeOnboard() {
   const S = store.S();
   if (S.settings.onboarded || S.entries.length || S.settings.ai.key) { if (!S.settings.onboarded) { S.settings.onboarded = true; store.save(); } return; }
   await new Promise((r) => setTimeout(r, 400));
-  const go1 = await confirmDialog({ title: '¡Bienvenido/a a ApexTrack!', text: 'Contale a la app lo que comés (escribiendo o con la voz) y la IA calcula calorías y macros. En 1 minuto la dejamos a tu medida: tus metas y tu clave gratuita de Gemini.', ok: 'Empezar', cancel: 'Más tarde' });
+  // ¿hay alguna copia de datos anteriores? (fotos diarias internas)
+  try {
+    const snaps = (await store.listSnapshots()).filter((x) => x.richness >= 3);
+    if (snaps.length) {
+      const sn = snaps[0];
+      if (await confirmDialog({ title: 'Encontré tus datos anteriores', text: `Hay una copia del ${sn.date.split('-').reverse().join('/')} con ${BK.describe(sn.data)}. ¿La restauro?`, ok: 'Restaurar', cancel: 'Empezar de cero' })) {
+        restoreData(sn.data, 'copia diaria interna'); return;
+      }
+    }
+  } catch { /* sin copias */ }
+  const choice = await pickOption({ title: '¡Bienvenido/a a ApexTrack!', options: [
+    { value: 'nuevo', label: 'Empezar', sub: 'Configurar mis metas y la IA en 1 minuto', icon: 'sparkle' },
+    { value: 'recuperar', label: 'Ya usaba la app: recuperar mis datos', sub: 'Desde Drive, un archivo de copia o la planilla anterior', icon: 'undo' },
+  ] });
+  if (choice === 'recuperar') { openRecover(); return; }
+  const go1 = choice === 'nuevo';
   S.settings.onboarded = true; store.commit('onboard');
   if (!go1) return;
   await editProfile();
@@ -1180,3 +1195,103 @@ Object.assign(moreActions, {
   'insight-run': () => openInsights(),
   'insight-open': (el) => openInsight(el.dataset.id),
 });
+
+// ===========================================================================
+// RECUPERAR DATOS Y COPIA AUTOMÁTICA EN DRIVE
+// ===========================================================================
+function restoreData(data, from) {
+  const keep = { key: store.S().settings.ai.key, backup: { ...store.S().settings.backup } };
+  store.replaceAll(data);
+  const S = store.S();
+  if (!S.settings.ai.key) S.settings.ai.key = keep.key;
+  S.settings.backup = { ...S.settings.backup, cloudUrl: keep.backup.cloudUrl || S.settings.backup.cloudUrl, cloudToken: keep.backup.cloudToken || S.settings.backup.cloudToken };
+  S.settings.onboarded = true;
+  store.commit('restore'); store.flush(); applyTheme();
+  toast(`Datos restaurados (${from}): ${BK.describe(S)}`, { ms: 7000 });
+}
+
+async function openRecover() {
+  const s = openSheet({ title: 'Recuperar datos', full: true, body: '<div class="status-line"><span class="spin"></span>Buscando copias…</div>' });
+  const snaps = await store.listSnapshots().catch(() => []);
+  const b = store.S().settings.backup;
+  s.setBody(`<p class="muted pad-b">Elegí de dónde traer tus datos. Lo que hay ahora en la app se reemplaza.</p>
+    <div class="set-group"><h3>Copias diarias guardadas en el teléfono</h3>
+      ${snaps.length ? snaps.map((x) => `<button class="set-row-btn" data-r-snap="${esc(x.name)}">${icon('calendar', 22)}<span class="grow">${esc(x.date.split('-').reverse().join('/'))}<small>${esc(BK.describe(x.data))}</small></span>${icon('right', 18)}</button>`).join('') : '<div class="set-row-btn" style="cursor:default"><span class="grow muted">No hay copias internas en este navegador.</span></div>'}
+    </div>
+    <div class="set-group"><h3>Google Drive</h3>
+      ${b.cloudUrl ? `<button class="set-row-btn" data-r-cloud="ultima">${icon('upload', 22)}<span class="grow">Última copia en Drive</span>${icon('right', 18)}</button><button class="set-row-btn" data-r-cloud="anterior">${icon('upload', 22)}<span class="grow">Copia del día anterior en Drive</span>${icon('right', 18)}</button>` : `<button class="set-row-btn" data-r-x="cloud">${icon('upload', 22)}<span class="grow">Conectar la copia en Drive<small>Si ya la tenías, pegá la misma dirección y clave para traer los datos</small></span>${icon('right', 18)}</button>`}
+    </div>
+    <div class="set-group"><h3>Archivos</h3>
+      <button class="set-row-btn" data-r-x="json">${icon('file', 22)}<span class="grow">Archivo de copia (.json)<small>Buscalo en Descargas o en Drive: ApexTrack_copia_…</small></span>${icon('right', 18)}</button>
+      <button class="set-row-btn" data-r-x="xlsx">${icon('file', 22)}<span class="grow">Excel exportado o planilla anterior (.xlsx)<small>Trae comidas, pesos, gimnasio y hábitos</small></span>${icon('right', 18)}</button>
+    </div>
+    <p class="note">¿Usabas la app desde otro navegador (Chrome, Samsung Internet) o desde el ícono instalado? Cada uno guarda sus datos por separado: abrila desde el mismo que usabas antes.</p>`);
+  s.body.addEventListener('click', async (e) => {
+    const sn = e.target.closest('[data-r-snap]'); const cl = e.target.closest('[data-r-cloud]'); const x = e.target.closest('[data-r-x]');
+    if (sn) {
+      const it = snaps.find((y) => y.name === sn.dataset.rSnap);
+      if (it && await confirmDialog({ title: `¿Restaurar la copia del ${it.date.split('-').reverse().join('/')}?`, text: BK.describe(it.data), ok: 'Restaurar' })) { s.close(); restoreData(it.data, 'copia diaria'); }
+    } else if (cl) {
+      try {
+        toast('Leyendo la copia de Drive…', { ms: 6000 });
+        const r = await BK.cloudPull(cl.dataset.rCloud);
+        if (await confirmDialog({ title: '¿Restaurar desde Drive?', text: `Copia del ${new Date(r.fecha).toLocaleString('es-AR')}: ${BK.describe(r.data)}.`, ok: 'Restaurar' })) { s.close(); restoreData(r.data, 'Google Drive'); }
+      } catch (err) { toast(err.message || 'No se pudo leer Drive', { kind: 'error', ms: 6000 }); }
+    } else if (x) {
+      if (x.dataset.rX === 'cloud') { s.close(); openCloudSetup(); }
+      else if (x.dataset.rX === 'json') { s.close(); restoreFlow(); }
+      else { s.close(); importFlow(); }
+    }
+  });
+}
+
+function openCloudSetup() {
+  const b = store.S().settings.backup;
+  const draw = () => `
+    <p class="muted pad-b">Una vez configurada, la app sube sola una copia a <b>tu</b> Google Drive (al menos una vez por día y cada vez que cambia algo, como mucho cada 3 horas). Se mantiene un solo archivo actualizado y la copia del día anterior, en la carpeta "ApexTrack copias". Se configura una sola vez, en la computadora o el celular:</p>
+    <ol class="steps">
+      <li>Entrá a <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com</a> con tu cuenta de Google → se abre un proyecto nuevo.</li>
+      <li>Borrá lo que aparece y pegá el código (botón <b>Copiar código</b> de abajo).</li>
+      <li>En la línea <code>const CLAVE = '…'</code> poné una palabra secreta tuya.</li>
+      <li>Tocá <b>Implementar → Nueva implementación</b> → tipo <b>Aplicación web</b> → Ejecutar como <b>Yo</b> → Quién tiene acceso: <b>Cualquier usuario</b> → Implementar → Autorizá los permisos.</li>
+      <li>Copiá la <b>URL de la aplicación web</b> (termina en /exec) y pegala acá abajo junto con tu clave.</li>
+    </ol>
+    <button class="btn" style="width:100%;margin:6px 0 14px" data-c="copy">${icon('copy', 18)} Copiar código del script</button>
+    <label class="field"><span>URL de la aplicación web</span><input class="input" id="c-url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(b.cloudUrl || '')}" autocomplete="off"></label>
+    <label class="field" style="margin-top:10px"><span>Clave secreta (la misma del script)</span><div class="input-wrap"><input class="input" id="c-tok" type="password" value="${esc(b.cloudToken || '')}" autocomplete="off"></div></label>
+    <div id="c-st" class="status-line" ${b.lastCloudAt || b.lastCloudError ? '' : 'hidden'}>${b.lastCloudError ? `${icon('alert', 20, 'bad')} ${esc(b.lastCloudError)}` : b.lastCloudAt ? `${icon('check', 20, 'ok')} Última copia: ${esc(new Date(b.lastCloudAt).toLocaleString('es-AR'))}` : ''}</div>`;
+  const s = openSheet({ title: 'Copia automática en Drive', full: true, body: draw(), footer: `<button class="btn ghost" data-c="pull">${icon('download', 18)} Traer de Drive</button><button class="btn primary" data-c="save">${icon('upload', 18)} Guardar y subir</button>` });
+  const read = () => {
+    const u = s.body.querySelector('#c-url').value.trim(); const t = s.body.querySelector('#c-tok').value.trim();
+    b.cloudUrl = u; b.cloudToken = t;
+  };
+  const handler = async (e) => {
+    const btn = e.target.closest('[data-c]'); if (!btn) return;
+    const k = btn.dataset.c;
+    if (k === 'copy') { try { await navigator.clipboard.writeText(BK.SCRIPT_CODE); toast('Código copiado'); } catch { toast('No se pudo copiar', { kind: 'error' }); } return; }
+    read();
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec/.test(b.cloudUrl)) { toast('Pegá la URL que termina en /exec', { kind: 'error' }); return; }
+    if (b.cloudToken.length < 4) { toast('Poné la clave secreta (mínimo 4 caracteres)', { kind: 'error' }); return; }
+    store.commit('backup');
+    const st = s.body.querySelector('#c-st'); st.hidden = false;
+    if (k === 'save') {
+      if (store.richness(store.S()) < 3) {
+        st.innerHTML = `${icon('info', 20)} La app está vacía: no subo nada para no pisar una copia que ya tengas. Si querés recuperar, tocá "Traer de Drive".`;
+        return;
+      }
+      setBusy(btn, true, 'Subiendo…');
+      const r = await BK.cloudPush({ force: true });
+      setBusy(btn, false);
+      st.innerHTML = r.ok ? `${icon('check', 20, 'ok')} Copia subida a Drive (${fmt((r.bytes || 0) / 1024)} KB). Desde ahora se actualiza sola.` : `${icon('alert', 20, 'bad')} ${esc(r.error || 'No se pudo subir')}`;
+    } else if (k === 'pull') {
+      setBusy(btn, true, 'Leyendo…');
+      try {
+        const r = await BK.cloudPull('ultima');
+        setBusy(btn, false);
+        if (await confirmDialog({ title: '¿Restaurar desde Drive?', text: `Copia del ${new Date(r.fecha).toLocaleString('es-AR')}: ${BK.describe(r.data)}. Reemplaza lo que hay ahora en la app.`, ok: 'Restaurar' })) { s.close(); restoreData(r.data, 'Google Drive'); }
+      } catch (err) { setBusy(btn, false); st.innerHTML = `${icon('alert', 20, 'bad')} ${esc(err.message)}`; }
+    }
+  };
+  s.body.addEventListener('click', handler);
+  s.foot.addEventListener('click', handler);
+}
