@@ -258,23 +258,31 @@ function instalarAvisos() {
 // ---------------------------------------------------------------------------
 // ECDSA P-256 (curva secp256r1) con BigInt
 // ---------------------------------------------------------------------------
+// Apps Script no acepta números BigInt escritos como 1n: se crean con BigInt().
+const K0_ = BigInt(0);
+const K1_ = BigInt(1);
+const K2_ = BigInt(2);
+const K3_ = BigInt(3);
+const K4_ = BigInt(4);
+const K8_ = BigInt(8);
+const K255_ = BigInt(255);
 const EC_P = BigInt('0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff');
 const EC_N = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551');
-const EC_G = [BigInt('0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296'), BigInt('0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5'), 1n];
-const md_ = (a, m) => { const r = a % m; return r < 0n ? r + m : r; };
+const EC_G = [BigInt('0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296'), BigInt('0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5'), K1_];
+const md_ = (a, m) => { const r = a % m; return r < K0_ ? r + m : r; };
 function inv_(a, m) {
-  let r0 = md_(a, m); let r1 = m; let s0 = 1n; let s1 = 0n;
+  let r0 = md_(a, m); let r1 = m; let s0 = K1_; let s1 = K0_;
   while (r1) { const q = r0 / r1; [r0, r1] = [r1, r0 - q * r1]; [s0, s1] = [s1, s0 - q * s1]; }
   return md_(s0, m);
 }
 function dbl_(pt) {
   const [X, Y, Z] = pt; const p = EC_P;
-  if (!Z || !Y) return [0n, 1n, 0n];
+  if (!Z || !Y) return [K0_, K1_, K0_];
   const delta = Z * Z % p; const gamma = Y * Y % p; const beta = X * gamma % p;
-  const alpha = md_(3n * (X - delta) * (X + delta), p);
-  const X3 = md_(alpha * alpha - 8n * beta, p);
+  const alpha = md_(K3_ * (X - delta) * (X + delta), p);
+  const X3 = md_(alpha * alpha - K8_ * beta, p);
   const Z3 = md_((Y + Z) * (Y + Z) - gamma - delta, p);
-  const Y3 = md_(alpha * (4n * beta - X3) - 8n * gamma * gamma, p);
+  const Y3 = md_(alpha * (K4_ * beta - X3) - K8_ * gamma * gamma, p);
   return [X3, Y3, Z3];
 }
 function add_(a, b) {
@@ -283,25 +291,25 @@ function add_(a, b) {
   const Z1Z1 = a[2] * a[2] % p; const Z2Z2 = b[2] * b[2] % p;
   const U1 = a[0] * Z2Z2 % p; const U2 = b[0] * Z1Z1 % p;
   const S1 = a[1] * b[2] % p * Z2Z2 % p; const S2 = b[1] * a[2] % p * Z1Z1 % p;
-  if (U1 === U2) return S1 === S2 ? dbl_(a) : [0n, 1n, 0n];
-  const H = md_(U2 - U1, p); const I = 4n * H * H % p; const J = H * I % p; const r = md_(2n * (S2 - S1), p); const V = U1 * I % p;
-  const X3 = md_(r * r - J - 2n * V, p);
-  const Y3 = md_(r * (V - X3) - 2n * S1 * J, p);
+  if (U1 === U2) return S1 === S2 ? dbl_(a) : [K0_, K1_, K0_];
+  const H = md_(U2 - U1, p); const I = K4_ * H * H % p; const J = H * I % p; const r = md_(K2_ * (S2 - S1), p); const V = U1 * I % p;
+  const X3 = md_(r * r - J - K2_ * V, p);
+  const Y3 = md_(r * (V - X3) - K2_ * S1 * J, p);
   const Z3 = md_(((a[2] + b[2]) * (a[2] + b[2]) - Z1Z1 - Z2Z2) * H, p);
   return [X3, Y3, Z3];
 }
 function mul_(k, pt) {
-  let R = [0n, 1n, 0n];
-  for (let i = BigInt(k.toString(2).length - 1); i >= 0n; i--) { R = dbl_(R); if ((k >> i) & 1n) R = add_(R, pt); }
+  let R = [K0_, K1_, K0_];
+  for (let i = BigInt(k.toString(2).length - 1); i >= K0_; i--) { R = dbl_(R); if ((k >> i) & K1_) R = add_(R, pt); }
   return R;
 }
 function afin_(pt) { const zi = inv_(pt[2], EC_P); const zi2 = zi * zi % EC_P; return [pt[0] * zi2 % EC_P, pt[1] * zi2 % EC_P * zi % EC_P]; }
-function aBytes_(n, len) { const out = []; for (let i = len - 1; i >= 0; i--) out[i] = Number((n >> BigInt(8 * (len - 1 - i))) & 255n); return out; }
-function deBytes_(b) { let n = 0n; for (const x of b) n = (n << 8n) + BigInt((x + 256) % 256); return n; }
+function aBytes_(n, len) { const out = []; for (let i = len - 1; i >= 0; i--) out[i] = Number((n >> BigInt(8 * (len - 1 - i))) & K255_); return out; }
+function deBytes_(b) { let n = K0_; for (const x of b) n = (n << K8_) + BigInt((x + 256) % 256); return n; }
 const b64u_ = (bytes) => Utilities.base64EncodeWebSafe(bytes.map((x) => (x > 127 ? x - 256 : x))).replace(/=+$/, '');
 function azar_() {
   const semilla = Utilities.getUuid() + Utilities.getUuid() + Utilities.getUuid() + Date.now() + Math.random();
-  return md_(deBytes_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, semilla)), EC_N - 1n) + 1n;
+  return md_(deBytes_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, semilla)), EC_N - K1_) + K1_;
 }
 function generarClaves_() {
   const d = azar_();
