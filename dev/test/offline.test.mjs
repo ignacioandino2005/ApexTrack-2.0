@@ -1,5 +1,5 @@
-import { analyzeOffline, TEST_CASES, testContext, evaluateDraft, groupTotals } from '../../app/js/ai.js';
-import * as store from '../../app/js/store.js';
+import { analyzeOffline, TEST_CASES, testContext, evaluateDraft, groupTotals } from '../../js/ai.js';
+import * as store from '../../js/store.js';
 const now = new Date(2026, 9, 17, 13, 30);
 for (const tc of TEST_CASES) {
   const ctx = testContext(tc, now);

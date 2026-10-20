@@ -15,6 +15,7 @@ import * as EN from './energy.js';
 import { openGoals } from './profile.js';
 import { insightsCard, openInsights, openInsight } from './insights.js';
 import * as BK from './backup.js';
+import * as CM from './community.js';
 
 const METRICS = {
   kcal: { label: 'Kcal', unit: 'kcal', dec: 0, goal: (g) => g.kcal, val: (d) => store.dayTotals(d).kcal },
@@ -507,7 +508,7 @@ export function openSettings(section = null) {
       ${row('backup', 'file', 'Copia de seguridad', S.settings.backup.lastAt ? `Última: ${relativeDayLabel(isoFromTs(S.settings.backup.lastAt)).toLowerCase()}` : 'Nunca hiciste una copia')}
       ${row('restore', 'upload', 'Restaurar copia', 'Desde un archivo .json de ApexTrack')}
       ${row('import', 'upload', 'Importar planilla anterior', 'El Excel o Google Sheets de la versión 1')}
-      ${row('cloud', 'upload', 'Copia automática en Google Drive', S.settings.backup.cloudUrl ? (S.settings.backup.lastCloudError ? `<span class="bad">Error: ${esc(S.settings.backup.lastCloudError)}</span>` : S.settings.backup.lastCloudAt ? `Activa · última ${esc(new Date(S.settings.backup.lastCloudAt).toLocaleString('es-AR', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }))}` : 'Configurada, todavía sin subir') : 'Recomendado: una copia diaria fuera del teléfono', S.settings.backup.cloudUrl ? '' : '<span class="bad">Activar</span>')}
+      ${row('cloud', 'upload', 'Copia automática en Google Drive', cloudStatusText(), BK.cloudActive() ? '' : '<span class="bad">Activar</span>')}
       ${row('recover', 'undo', 'Recuperar datos', 'Desde Drive, las copias diarias internas o un archivo')}
       ${row('borrar', 'trash', 'Borrar todos los datos', '')}
     </div>
@@ -515,7 +516,7 @@ export function openSettings(section = null) {
       ${row('share', 'send', 'Compartir la app', 'Cada persona usa su propio teléfono, sus datos y su clave')}
     </div>
     <div class="set-group"><h3>Acerca de</h3>
-      <div class="set-row-btn" style="cursor:default">${icon('info', 22)}<span class="grow">ApexTrack ${store.APP_VERSION}<small>Datos en este teléfono, en 3 lugares + copia diaria interna${store.state.persisted ? ' · almacenamiento protegido' : ' · el navegador podría borrarlos si falta espacio: activá la copia en Drive'}. ${store.S().entries.length} comidas registradas.</small></span></div>
+      <div class="set-row-btn" style="cursor:default">${icon('info', 22)}<span class="grow">ApexTrack ${store.APP_VERSION}<small>Datos en este teléfono, en 3 lugares + copia diaria interna${store.state.persisted ? ' · almacenamiento protegido' : ' · el navegador podría borrarlos si falta espacio: activá la copia en Drive'}${BK.cloudActive() ? ' · copia diaria en Google Drive' : ''}. ${store.S().entries.length} comidas registradas.</small></span></div>
     </div>`;
   const s = openSheet({ title: 'Ajustes', full: true, body: draw() });
   settingsSheet = s;
@@ -575,6 +576,11 @@ function openAISettings() {
       <button class="set-row-btn" data-a="diag">${icon('info', 22)}<span class="grow">Diagnóstico de la conexión<small>Prueba cada vía por separado y arma un informe para copiar (usa 4 consultas)</small></span>${icon('right', 18)}</button>
       <button class="set-row-btn" data-a="web">${icon('globe', 22)}<span class="grow">Búsqueda de Google<small>${ai.webNote ? esc(ai.webNote) : 'Las claves gratuitas no suelen tener cupo de búsqueda. Las marcas se buscan igual en Open Food Facts.'}</small></span><span class="switch ${ai.web !== false ? 'on' : ''}" role="switch" aria-checked="${ai.web !== false}"></span></button>
     </div>
+    <div class="set-group" style="margin-top:14px"><h3>IA propia (funciona sin conexión)</h3>
+      <button class="set-row-btn" data-a="local">${icon('bolt', 22)}<span class="grow">Resolver al instante lo que entiende<small>Si la IA propia reconoce todos los alimentos del mensaje, no espera a Gemini. Siempre podés tocar "Revisar con Gemini".</small></span><span class="switch ${ai.localFirst !== false ? 'on' : ''}" role="switch" aria-checked="${ai.localFirst !== false}"></span></button>
+      ${CM.available() ? `<button class="set-row-btn" data-a="share">${icon('send', 22)}<span class="grow">Ayudar a entrenarla<small>Comparte de forma anónima qué comidas analizó Gemini (lo que dijiste y lo que entendió). Nunca tu nombre, peso, metas ni tu clave.</small></span><span class="switch ${ai.share !== false ? 'on' : ''}" role="switch" aria-checked="${ai.share !== false}"></span></button>
+      <button class="set-row-btn" data-a="know">${icon('library', 22)}<span class="grow">Conocimiento compartido<small>${(() => { const k = CM.knowledgeInfo(); return k ? `${fmt(k.foods)} alimentos y ${fmt(k.phrases)} frases aprendidas de ${fmt(k.users)} personas · actualizado ${esc(new Date(k.fetchedAt).toLocaleDateString('es-AR'))}` : 'Todavía no se descargó'; })()}${CM.queued() ? ` · ${CM.queued()} aportes por enviar` : ''}</small></span>${icon('repeat', 18)}</button>` : ''}
+    </div>
     <label class="field" style="margin-top:14px"><span>Indicaciones para la IA (opcional)</span><textarea class="input" id="ai-notes" rows="3" placeholder="Ej.: la leche que tomo es Protein de La Serenísima. Cuando digo 'un plato' de pasta son 350 g cocidos.">${esc(ai.notes || '')}</textarea></label>
     <div id="ai-status" class="status-line" ${ai.lastTest ? '' : 'hidden'}>${ai.lastTest ? esc(ai.lastTest) : ''}</div>`;
   const s = openSheet({ title: 'Inteligencia artificial', full: true, body: draw(), footer: `<button class="btn ghost" data-a="test">${icon('link', 18)} Probar conexión</button><button class="btn primary" data-a="save">Guardar</button>` });
@@ -599,6 +605,13 @@ function openAISettings() {
       const v = await pickOption({ title: 'Modelo', value: ai.model || 'auto', options: [{ value: 'auto', label: 'Automático', sub: 'Recomendado: si un modelo deja de existir, usa otro' }, ...list.map((m) => ({ value: m, label: m }))] });
       if (v) { ai.model = v; store.commit('ia'); s.setBody(draw()); }
     } else if (a === 'web') { ai.web = ai.web === false; store.commit('ia'); s.setBody(draw()); }
+    else if (a === 'local') { ai.localFirst = ai.localFirst === false; store.commit('ia'); s.setBody(draw()); }
+    else if (a === 'share') { ai.share = ai.share === false; store.commit('ia'); s.setBody(draw()); }
+    else if (a === 'know') {
+      setBusy(b, true, 'Actualizando…');
+      try { await CM.flush(); await CM.syncKnowledge({ force: true }); toast('Conocimiento actualizado'); } catch (err) { toast('No se pudo actualizar: ' + (err.message || err), { kind: 'error' }); }
+      setBusy(b, false); s.setBody(draw());
+    }
     else if (a === 'save') { store.commit('ia'); s.close(); toast(ai.key ? 'IA configurada' : 'Guardado (sin clave, se usa la biblioteca)'); }
     else if (a === 'diag') { if (!ai.key) { toast('Pegá primero tu clave', { kind: 'error' }); return; } store.commit('ia'); openDiagnose(ai); }
     else if (a === 'test') {
@@ -1199,27 +1212,55 @@ Object.assign(moreActions, {
 // ===========================================================================
 // RECUPERAR DATOS Y COPIA AUTOMÁTICA EN DRIVE
 // ===========================================================================
+function cloudStatusText() {
+  const b = store.S().settings.backup;
+  if (!BK.cloudActive()) return 'Recomendado: una copia diaria fuera del teléfono';
+  if (b.lastCloudError) return `<span class="bad">Error: ${esc(b.lastCloudError)}</span>`;
+  const who = b.drive && b.driveEmail ? ` · ${esc(b.driveEmail)}` : '';
+  if (b.needAuth && BK.isDue()) return `Pendiente: se sube con tu próximo toque${who}`;
+  return b.lastCloudAt ? `Activa · última ${esc(new Date(b.lastCloudAt).toLocaleString('es-AR', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }))}${who}` : `Conectada, todavía sin subir${who}`;
+}
+
 function restoreData(data, from) {
   const keep = { key: store.S().settings.ai.key, backup: { ...store.S().settings.backup } };
   store.replaceAll(data);
   const S = store.S();
   if (!S.settings.ai.key) S.settings.ai.key = keep.key;
-  S.settings.backup = { ...S.settings.backup, cloudUrl: keep.backup.cloudUrl || S.settings.backup.cloudUrl, cloudToken: keep.backup.cloudToken || S.settings.backup.cloudToken };
+  // la conexión con Drive de este teléfono se mantiene (no la de la copia)
+  const kb = keep.backup;
+  S.settings.backup = { ...S.settings.backup, cloudUrl: kb.cloudUrl || S.settings.backup.cloudUrl, cloudToken: kb.cloudToken || S.settings.backup.cloudToken, drive: kb.drive || S.settings.backup.drive, driveEmail: kb.driveEmail || S.settings.backup.driveEmail, driveFolderId: kb.driveFolderId || S.settings.backup.driveFolderId, lastCloudRichness: store.richness(S) };
   S.settings.onboarded = true;
   store.commit('restore'); store.flush(); applyTheme();
-  toast(`Datos restaurados (${from}): ${BK.describe(S)}`, { ms: 7000 });
+  toast(`Datos restaurados (${from}): ${BK.describe(S)}. Lo que había antes quedó guardado en "Recuperar datos".`, { ms: 8000 });
+}
+
+const fmtCopyDate = (x) => x.date ? x.date.split('-').reverse().join('/') : x.name;
+
+/** Elegir una copia de Drive y restaurarla. */
+async function pickCloudCopy(onDone) {
+  let list;
+  try { toast('Buscando copias en Drive…', { ms: 4000 }); list = await BK.cloudList(); } catch (err) { toast(err.message || 'No se pudo leer Drive', { kind: 'error', ms: 6000 }); return; }
+  if (!list.length) { toast('Todavía no hay copias en Drive.', { ms: 5000 }); return; }
+  const id = await pickOption({ title: 'Copias en Google Drive', options: list.map((x, i) => ({ value: x.id, label: x.legacy ? x.name : `${fmtCopyDate(x)}${i === 0 ? ' (la más nueva)' : ''}${/_reducida/.test(x.name) ? ' · con menos datos' : ''}`, sub: x.size ? `${fmt(x.size / 1024)} KB` : '', icon: 'calendar' })) });
+  if (!id) return;
+  try {
+    const r = await BK.cloudPull(id);
+    if (await confirmDialog({ title: '¿Restaurar desde Drive?', text: `Copia del ${new Date(r.fecha).toLocaleString('es-AR')}: ${BK.describe(r.data)}. Reemplaza lo que hay ahora en la app (lo actual queda guardado por las dudas).`, ok: 'Restaurar' })) { onDone?.(); restoreData(r.data, 'Google Drive'); }
+  } catch (err) { toast(err.message || 'No se pudo leer la copia', { kind: 'error', ms: 6000 }); }
 }
 
 async function openRecover() {
   const s = openSheet({ title: 'Recuperar datos', full: true, body: '<div class="status-line"><span class="spin"></span>Buscando copias…</div>' });
   const snaps = await store.listSnapshots().catch(() => []);
-  const b = store.S().settings.backup;
-  s.setBody(`<p class="muted pad-b">Elegí de dónde traer tus datos. Lo que hay ahora en la app se reemplaza.</p>
-    <div class="set-group"><h3>Copias diarias guardadas en el teléfono</h3>
-      ${snaps.length ? snaps.map((x) => `<button class="set-row-btn" data-r-snap="${esc(x.name)}">${icon('calendar', 22)}<span class="grow">${esc(x.date.split('-').reverse().join('/'))}<small>${esc(BK.describe(x.data))}</small></span>${icon('right', 18)}</button>`).join('') : '<div class="set-row-btn" style="cursor:default"><span class="grow muted">No hay copias internas en este navegador.</span></div>'}
-    </div>
+  const snapLabel = (x) => x.before ? `Lo que había ${esc(x.before)} · ${esc(new Date(x.updatedAt || Date.now()).toLocaleString('es-AR', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }))}` : esc(x.date.split('-').reverse().join('/'));
+  s.setBody(`<p class="muted pad-b">Elegí de dónde traer tus datos. Lo que hay ahora en la app se reemplaza, pero antes se guarda una copia acá mismo por si te equivocás.</p>
     <div class="set-group"><h3>Google Drive</h3>
-      ${b.cloudUrl ? `<button class="set-row-btn" data-r-cloud="ultima">${icon('upload', 22)}<span class="grow">Última copia en Drive</span>${icon('right', 18)}</button><button class="set-row-btn" data-r-cloud="anterior">${icon('upload', 22)}<span class="grow">Copia del día anterior en Drive</span>${icon('right', 18)}</button>` : `<button class="set-row-btn" data-r-x="cloud">${icon('upload', 22)}<span class="grow">Conectar la copia en Drive<small>Si ya la tenías, pegá la misma dirección y clave para traer los datos</small></span>${icon('right', 18)}</button>`}
+      ${BK.cloudActive()
+    ? `<button class="set-row-btn" data-r-x="drive">${icon('upload', 22)}<span class="grow">Elegir una copia de Drive<small>Una por día de las últimas 2 semanas y una por mes</small></span>${icon('right', 18)}</button>`
+    : `<button class="set-row-btn" data-r-x="cloud">${icon('upload', 22)}<span class="grow">Conectar con Google Drive<small>Si ya tenías la copia activada, entrá con la misma cuenta para traer tus datos</small></span>${icon('right', 18)}</button>`}
+    </div>
+    <div class="set-group"><h3>Copias guardadas en el teléfono</h3>
+      ${snaps.length ? snaps.map((x) => `<button class="set-row-btn" data-r-snap="${esc(x.name)}">${icon(x.before ? 'undo' : 'calendar', 22)}<span class="grow">${snapLabel(x)}<small>${esc(BK.describe(x.data))}</small></span>${icon('right', 18)}</button>`).join('') : '<div class="set-row-btn" style="cursor:default"><span class="grow muted">No hay copias internas en este navegador.</span></div>'}
     </div>
     <div class="set-group"><h3>Archivos</h3>
       <button class="set-row-btn" data-r-x="json">${icon('file', 22)}<span class="grow">Archivo de copia (.json)<small>Buscalo en Descargas o en Drive: ApexTrack_copia_…</small></span>${icon('right', 18)}</button>
@@ -1227,18 +1268,13 @@ async function openRecover() {
     </div>
     <p class="note">¿Usabas la app desde otro navegador (Chrome, Samsung Internet) o desde el ícono instalado? Cada uno guarda sus datos por separado: abrila desde el mismo que usabas antes.</p>`);
   s.body.addEventListener('click', async (e) => {
-    const sn = e.target.closest('[data-r-snap]'); const cl = e.target.closest('[data-r-cloud]'); const x = e.target.closest('[data-r-x]');
+    const sn = e.target.closest('[data-r-snap]'); const x = e.target.closest('[data-r-x]');
     if (sn) {
       const it = snaps.find((y) => y.name === sn.dataset.rSnap);
-      if (it && await confirmDialog({ title: `¿Restaurar la copia del ${it.date.split('-').reverse().join('/')}?`, text: BK.describe(it.data), ok: 'Restaurar' })) { s.close(); restoreData(it.data, 'copia diaria'); }
-    } else if (cl) {
-      try {
-        toast('Leyendo la copia de Drive…', { ms: 6000 });
-        const r = await BK.cloudPull(cl.dataset.rCloud);
-        if (await confirmDialog({ title: '¿Restaurar desde Drive?', text: `Copia del ${new Date(r.fecha).toLocaleString('es-AR')}: ${BK.describe(r.data)}.`, ok: 'Restaurar' })) { s.close(); restoreData(r.data, 'Google Drive'); }
-      } catch (err) { toast(err.message || 'No se pudo leer Drive', { kind: 'error', ms: 6000 }); }
+      if (it && await confirmDialog({ title: it.before ? '¿Volver a lo que había antes?' : `¿Restaurar la copia del ${it.date.split('-').reverse().join('/')}?`, text: BK.describe(it.data), ok: 'Restaurar' })) { s.close(); restoreData(it.data, 'copia del teléfono'); }
     } else if (x) {
-      if (x.dataset.rX === 'cloud') { s.close(); openCloudSetup(); }
+      if (x.dataset.rX === 'drive') pickCloudCopy(() => s.close());
+      else if (x.dataset.rX === 'cloud') { s.close(); openCloudSetup(); }
       else if (x.dataset.rX === 'json') { s.close(); restoreFlow(); }
       else { s.close(); importFlow(); }
     }
@@ -1247,50 +1283,71 @@ async function openRecover() {
 
 function openCloudSetup() {
   const b = store.S().settings.backup;
-  const draw = () => `
-    <p class="muted pad-b">Una vez configurada, la app sube sola una copia a <b>tu</b> Google Drive (al menos una vez por día y cada vez que cambia algo, como mucho cada 3 horas). Se mantiene un solo archivo actualizado y la copia del día anterior, en la carpeta "ApexTrack copias". Se configura una sola vez, en la computadora o el celular:</p>
-    <ol class="steps">
-      <li>Entrá a <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com</a> con tu cuenta de Google → se abre un proyecto nuevo.</li>
-      <li>Borrá lo que aparece y pegá el código (botón <b>Copiar código</b> de abajo).</li>
-      <li>En la línea <code>const CLAVE = '…'</code> poné una palabra secreta tuya.</li>
-      <li>Tocá <b>Implementar → Nueva implementación</b> → tipo <b>Aplicación web</b> → Ejecutar como <b>Yo</b> → Quién tiene acceso: <b>Cualquier usuario</b> → Implementar → Autorizá los permisos.</li>
-      <li>Copiá la <b>URL de la aplicación web</b> (termina en /exec) y pegala acá abajo junto con tu clave.</li>
-    </ol>
-    <button class="btn" style="width:100%;margin:6px 0 14px" data-c="copy">${icon('copy', 18)} Copiar código del script</button>
-    <label class="field"><span>URL de la aplicación web</span><input class="input" id="c-url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(b.cloudUrl || '')}" autocomplete="off"></label>
-    <label class="field" style="margin-top:10px"><span>Clave secreta (la misma del script)</span><div class="input-wrap"><input class="input" id="c-tok" type="password" value="${esc(b.cloudToken || '')}" autocomplete="off"></div></label>
-    <div id="c-st" class="status-line" ${b.lastCloudAt || b.lastCloudError ? '' : 'hidden'}>${b.lastCloudError ? `${icon('alert', 20, 'bad')} ${esc(b.lastCloudError)}` : b.lastCloudAt ? `${icon('check', 20, 'ok')} Última copia: ${esc(new Date(b.lastCloudAt).toLocaleString('es-AR'))}` : ''}</div>`;
-  const s = openSheet({ title: 'Copia automática en Drive', full: true, body: draw(), footer: `<button class="btn ghost" data-c="pull">${icon('download', 18)} Traer de Drive</button><button class="btn primary" data-c="save">${icon('upload', 18)} Guardar y subir</button>` });
-  const read = () => {
-    const u = s.body.querySelector('#c-url').value.trim(); const t = s.body.querySelector('#c-tok').value.trim();
-    b.cloudUrl = u; b.cloudToken = t;
+  const status = () => {
+    if (b.lastCloudError) return `${icon('alert', 20, 'bad')} ${esc(b.lastCloudError)}`;
+    if (b.lastCloudAt) return `${icon('check', 20, 'ok')} Última copia: ${esc(new Date(b.lastCloudAt).toLocaleString('es-AR'))}`;
+    return '';
+  };
+  const draw = () => {
+    const connected = BK.driveAvailable() && b.drive;
+    const google = BK.driveAvailable() ? (connected
+      ? `<div class="banner">${icon('check', 20, 'ok')}<div class="grow"><b>Conectada${b.driveEmail ? ` a ${esc(b.driveEmail)}` : ''}</b><div class="muted" style="margin-top:4px">Cada día se guarda una copia en tu Drive, carpeta "ApexTrack copias". Se conservan las de las últimas 2 semanas y una por mes.</div></div></div>`
+      : `<p class="muted pad-b">Tocá <b>Conectar con Google</b>, elegí tu cuenta y aceptá. ApexTrack solo puede ver y crear sus propios archivos, dentro de la carpeta "ApexTrack copias": no ve el resto de tu Drive.</p>
+         <p class="muted pad-b">Después se sube sola una copia por día (y cuando hay cambios, como mucho cada 3 horas). Google pide renovar el permiso cada tanto: la app lo hace con tu siguiente toque y su ventanita se cierra sola.</p>`)
+      : `<div class="banner">${icon('info', 20)}<div class="grow">La conexión directa con Google se habilita en la próxima actualización. Mientras tanto hacé copias con "Copia de seguridad".</div></div>`;
+    const legacy = BK.legacyConnected() || b.cloudUrl
+      ? `<details style="margin-top:16px"${!BK.driveAvailable() ? ' open' : ''}><summary class="muted">Método anterior (Apps Script propio)</summary>
+          <p class="muted" style="margin:8px 0">Sigue funcionando si ya lo tenías configurado.${BK.driveAvailable() ? ' Al conectar con Google, se usa lo nuevo y este se puede borrar.' : ''}</p>
+          <label class="field"><span>URL de la aplicación web</span><input class="input" id="c-url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(b.cloudUrl || '')}" autocomplete="off"></label>
+          <label class="field" style="margin-top:10px"><span>Clave secreta (la misma del script)</span><div class="input-wrap"><input class="input" id="c-tok" type="password" value="${esc(b.cloudToken || '')}" autocomplete="off"></div></label>
+          <button class="btn" style="width:100%;margin-top:10px" data-c="legacy-save">Guardar dirección</button>
+          ${b.cloudUrl ? '<button class="btn ghost" style="width:100%;margin-top:6px" data-c="legacy-del">Dejar de usar el método anterior</button>' : ''}
+        </details>` : '';
+    return `${google}
+      <div id="c-st" class="status-line" ${status() ? '' : 'hidden'}>${status()}</div>
+      ${connected ? `<button class="btn ghost" style="width:100%;margin-top:10px" data-c="pull">${icon('download', 18)} Traer una copia de Drive</button><button class="btn ghost" style="width:100%;margin-top:6px" data-c="off">Desconectar Google Drive</button>` : ''}
+      ${legacy}`;
+  };
+  const foot = () => {
+    if (BK.driveAvailable() && b.drive) return `<button class="btn primary block" data-c="push">${icon('upload', 18)} Subir copia ahora</button>`;
+    if (BK.driveAvailable()) return `<button class="btn primary block" data-c="connect">${icon('upload', 18)} Conectar con Google</button>`;
+    return BK.legacyConnected() ? `<button class="btn ghost" data-c="pull">${icon('download', 18)} Traer de Drive</button><button class="btn primary" data-c="push">${icon('upload', 18)} Subir ahora</button>` : '';
+  };
+  const s = openSheet({ title: 'Copia automática en Drive', full: true, body: draw(), footer: foot() });
+  const redraw = () => { s.setBody(draw()); s.setFooter(foot()); };
+  const say = (html) => { const st = s.body.querySelector('#c-st'); if (st) { st.hidden = false; st.innerHTML = html; } };
+  const push = async (btn) => {
+    if (store.richness(store.S()) < 3) { say(`${icon('info', 20)} La app está vacía: no subo nada para no pisar una copia que ya tengas. Si querés recuperar, tocá "Traer una copia de Drive".`); return; }
+    setBusy(btn, true, 'Subiendo…');
+    const r = await BK.cloudPush({ force: true, interactive: true });
+    setBusy(btn, false);
+    say(r.ok ? `${icon('check', 20, 'ok')} Copia subida a Drive (${fmt((r.bytes || 0) / 1024)} KB). Desde ahora se actualiza sola.` : `${icon('alert', 20, 'bad')} ${esc(r.error || (r.skipped === 'sin permiso' ? 'Falta el permiso de Google: tocá de nuevo.' : r.skipped) || 'No se pudo subir')}`);
   };
   const handler = async (e) => {
     const btn = e.target.closest('[data-c]'); if (!btn) return;
     const k = btn.dataset.c;
-    if (k === 'copy') { try { await navigator.clipboard.writeText(BK.SCRIPT_CODE); toast('Código copiado'); } catch { toast('No se pudo copiar', { kind: 'error' }); } return; }
-    read();
-    if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec/.test(b.cloudUrl)) { toast('Pegá la URL que termina en /exec', { kind: 'error' }); return; }
-    if (b.cloudToken.length < 4) { toast('Poné la clave secreta (mínimo 4 caracteres)', { kind: 'error' }); return; }
-    store.commit('backup');
-    const st = s.body.querySelector('#c-st'); st.hidden = false;
-    if (k === 'save') {
-      if (store.richness(store.S()) < 3) {
-        st.innerHTML = `${icon('info', 20)} La app está vacía: no subo nada para no pisar una copia que ya tengas. Si querés recuperar, tocá "Traer de Drive".`;
-        return;
-      }
-      setBusy(btn, true, 'Subiendo…');
-      const r = await BK.cloudPush({ force: true });
-      setBusy(btn, false);
-      st.innerHTML = r.ok ? `${icon('check', 20, 'ok')} Copia subida a Drive (${fmt((r.bytes || 0) / 1024)} KB). Desde ahora se actualiza sola.` : `${icon('alert', 20, 'bad')} ${esc(r.error || 'No se pudo subir')}`;
-    } else if (k === 'pull') {
-      setBusy(btn, true, 'Leyendo…');
+    if (k === 'connect') {
       try {
-        const r = await BK.cloudPull('ultima');
-        setBusy(btn, false);
-        if (await confirmDialog({ title: '¿Restaurar desde Drive?', text: `Copia del ${new Date(r.fecha).toLocaleString('es-AR')}: ${BK.describe(r.data)}. Reemplaza lo que hay ahora en la app.`, ok: 'Restaurar' })) { s.close(); restoreData(r.data, 'Google Drive'); }
-      } catch (err) { setBusy(btn, false); st.innerHTML = `${icon('alert', 20, 'bad')} ${esc(err.message)}`; }
-    }
+        await BK.authorize({ firstTime: true });
+        store.commit('backup');
+        redraw();
+        if (store.richness(store.S()) >= 3) await push(s.foot.querySelector('[data-c="push"]'));
+        else {
+          // app vacía (teléfono nuevo o datos borrados): ofrecer traer la copia
+          const list = await BK.cloudList().catch(() => []);
+          if (list.length) { say(`${icon('info', 20)} Encontré ${list.length} ${list.length === 1 ? 'copia' : 'copias'} en tu Drive.`); pickCloudCopy(() => s.close()); }
+        }
+      } catch (err) { say(`${icon('alert', 20, 'bad')} ${esc(err.message)}`); }
+    } else if (k === 'push') await push(btn);
+    else if (k === 'pull') pickCloudCopy(() => s.close());
+    else if (k === 'off') {
+      if (await confirmDialog({ title: '¿Desconectar Google Drive?', text: 'Las copias que ya están en tu Drive no se borran. La app deja de subir copias nuevas.', ok: 'Desconectar' })) { BK.disconnect(); redraw(); }
+    } else if (k === 'legacy-save') {
+      const u = s.body.querySelector('#c-url').value.trim(); const t = s.body.querySelector('#c-tok').value.trim();
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec/.test(u)) { toast('Pegá la URL que termina en /exec', { kind: 'error' }); return; }
+      if (t.length < 4) { toast('Poné la clave secreta (mínimo 4 caracteres)', { kind: 'error' }); return; }
+      b.cloudUrl = u; b.cloudToken = t; store.commit('backup'); redraw(); toast('Guardado');
+    } else if (k === 'legacy-del') { b.cloudUrl = ''; b.cloudToken = ''; store.commit('backup'); redraw(); }
   };
   s.body.addEventListener('click', handler);
   s.foot.addEventListener('click', handler);

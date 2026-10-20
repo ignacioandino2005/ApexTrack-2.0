@@ -1,4 +1,4 @@
-import { BUILTIN_FOODS, atwater, parseLocal, searchFoods, splitSegments, calc, per100Of } from '../../app/js/foods.js';
+import { BUILTIN_FOODS, atwater, parseLocal, searchFoods, splitSegments, calc, per100Of } from '../../js/foods.js';
 let bad = 0; const ids = new Set();
 for (const f of BUILTIN_FOODS) {
   if (ids.has(f.id)) { console.log('DUP', f.id); bad++; } ids.add(f.id);

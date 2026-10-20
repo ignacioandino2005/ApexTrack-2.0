@@ -1,5 +1,5 @@
-import { normalizeDraft, TEST_CASES, testContext, evaluateDraft, groupTotals, draftTotals } from '../../app/js/ai.js';
-import * as store from '../../app/js/store.js';
+import { normalizeDraft, TEST_CASES, testContext, evaluateDraft, groupTotals, draftTotals } from '../../js/ai.js';
+import * as store from '../../js/store.js';
 import { MOCKS, BAD } from './mock_responses.mjs';
 const now = new Date(2026, 9, 17, 13, 30);
 let pass = 0;

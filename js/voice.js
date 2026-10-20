@@ -10,7 +10,22 @@ export const canRecord = () => !!(navigator.mediaDevices && navigator.mediaDevic
  * automáticamente hasta que el usuario toca "detener".
  * onText(finalAcumulado, parcial) ; onState('escuchando'|'detenido'|'error', mensaje)
  */
-export function startDictation({ onText, onState, lang = 'es-AR' }) {
+/**
+ * Une lo dictado: cada frase final del reconocedor corresponde a una pausa al hablar, así que se separa
+ * con una coma (sirve para separar los alimentos). No se agrega si la frase nueva empieza con un
+ * conector ("y", "con", "de"…) o si ya hay puntuación.
+ */
+const CONNECTOR = /^(y|e|o|u|con|de|del|sin|a|al|en|que|pero|más|mas|para|por|aprox|aproximadamente|gramos|g|ml|kilos?|litros?)\b/i;
+export function joinPhrase(prev, next, commas = true) {
+  const a = String(prev || '').replace(/\s+/g, ' ').trim();
+  const b = String(next || '').replace(/\s+/g, ' ').trim();
+  if (!a) return b;
+  if (!b) return a;
+  const sep = commas && !/[,.;:!?]$/.test(a) && !/^[,.;:!?]/.test(b) && !CONNECTOR.test(b) ? ', ' : ' ';
+  return a + sep + b;
+}
+
+export function startDictation({ onText, onState, lang = 'es-AR', commas = true }) {
   const Ctor = SR();
   if (!Ctor) { onState?.('error', 'Este navegador no permite dictar. Probá con Chrome o usá "Grabar audio".'); return null; }
   let active = true;
@@ -27,7 +42,7 @@ export function startDictation({ onText, onState, lang = 'es-AR' }) {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
-        if (r.isFinal) finalText = (finalText + ' ' + r[0].transcript).replace(/\s+/g, ' ').trim();
+        if (r.isFinal) finalText = joinPhrase(finalText, r[0].transcript, commas);
         else interim += r[0].transcript;
       }
       onText?.(finalText, interim.trim());

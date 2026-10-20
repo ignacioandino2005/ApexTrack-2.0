@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { MOCKS } from './mock_responses.mjs';
 
-const ROOT = path.resolve('../../app');
+const ROOT = path.resolve('../..');
 const OUT = process.env.SHOTS || '/tmp/shots';
 fs.mkdirSync(OUT, { recursive: true });
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.json': 'application/json' };
@@ -272,30 +272,48 @@ await sheetTop().locator('[data-s="excel"]').click(); await page.waitForTimeout(
 await sheetTop().locator('.opt[data-v="todo"]').click();
 const d = await dl.catch((e) => null);
 if (d) { await d.saveAs(`${OUT}/export.xlsx`); ok('Excel exportado', true, d.suggestedFilename()); } else ok('Excel exportado', false);
-// importar planilla anterior
-const fc = page.waitForEvent('filechooser');
-await sheetTop().locator('[data-s="import"]').click();
-const chooser = await fc;
-await chooser.setFiles(path.resolve('../../ref/consolidado.xlsx'));
-await page.waitForSelector('.sheet-wrap:last-child [data-r="1"]', { timeout: 15000 }).catch(() => {});
-await shot('33-importar');
-const impText = await sheetTop().innerText();
-await sheetTop().locator('[data-r="1"]').click(); await page.waitForTimeout(600);
-const nItems = await val(() => window.__apex.store.S().entries.reduce((a, e) => a + e.items.length, 0));
-ok('Importa la planilla anterior', nItems > 200, `${nItems} alimentos · ${impText.replace(/\s+/g, ' ').slice(0, 220)}`);
-await closeSheet();
-await tap('.tab[data-tab="diario"]');
-await tap('[data-act="dia-mode"][data-v="semana"]');
-await tap('[data-act="dia-pick"]');
-await sheetTop().locator('[data-nav="-1"]').click();
-await sheetTop().locator('.cal-d[data-d="2026-09-30"]').click(); await page.waitForTimeout(300);
-await shot('34-diario-importado');
-await tap('.tab[data-tab="progreso"]');
-await tap('[data-act="prog-range"][data-v="todo"]');
-await shot('35-progreso-importado');
+// importar planilla anterior (solo si está la planilla de referencia, que no se sube al repositorio)
+const V1 = path.resolve('../../ref/consolidado.xlsx');
+if (fs.existsSync(V1)) {
+  const fc = page.waitForEvent('filechooser');
+  await sheetTop().locator('[data-s="import"]').click();
+  const chooser = await fc;
+  await chooser.setFiles(V1);
+  await page.waitForSelector('.sheet-wrap:last-child [data-r="1"]', { timeout: 15000 }).catch(() => {});
+  await shot('33-importar');
+  const impText = await sheetTop().innerText();
+  await sheetTop().locator('[data-r="1"]').click(); await page.waitForTimeout(600);
+  const nItems = await val(() => window.__apex.store.S().entries.reduce((a, e) => a + e.items.length, 0));
+  ok('Importa la planilla anterior', nItems > 200, `${nItems} alimentos · ${impText.replace(/\s+/g, ' ').slice(0, 220)}`);
+  await closeSheet();
+  await tap('.tab[data-tab="diario"]');
+  await tap('[data-act="dia-mode"][data-v="semana"]');
+  await tap('[data-act="dia-pick"]');
+  await sheetTop().locator('[data-nav="-1"]').click();
+  await sheetTop().locator('.cal-d[data-d="2026-09-30"]').click(); await page.waitForTimeout(300);
+  await shot('34-diario-importado');
+  await tap('.tab[data-tab="progreso"]');
+  await tap('[data-act="prog-range"][data-v="todo"]');
+  await shot('35-progreso-importado');
+} else { ok('Importa la planilla anterior (omitido: falta ref/consolidado.xlsx)', true); await closeSheet(); }
 
-// análisis en segundo plano: cerrar la ventana mientras la IA trabaja
+// IA propia: un mensaje que entiende por completo se resuelve al instante, sin consultar a Gemini
 await tap('.tab[data-tab="hoy"]');
+await tap('#tab-rec');
+const callsBefore = aiCalls;
+await sheetTop().locator('#lg-text').fill('2 huevos y una banana');
+await sheetTop().locator('[data-l="analyze"]').click();
+await page.waitForSelector('[data-r="save"]', { timeout: 3000 }).catch(() => {});
+const localTxt = await sheetTop().innerText();
+await shot('35b-ia-propia');
+ok('IA propia: resuelve al instante sin Gemini', /IA propia/.test(localTxt) && aiCalls === callsBefore, localTxt.replace(/\s+/g, ' ').slice(0, 120));
+await sheetTop().locator('[data-r="gemini"]').click();
+for (let i = 0; i < 40 && aiCalls === callsBefore; i++) await page.waitForTimeout(250);
+await page.waitForSelector('.rv-meta:has-text("Flash")', { timeout: 10000 }).catch(() => {});
+ok('"Revisar con Gemini" consulta a la IA', aiCalls > callsBefore, `${aiCalls - callsBefore} consultas`);
+await closeSheet();
+// análisis en segundo plano: cerrar la ventana mientras la IA trabaja (con la IA propia apagada, para forzar Gemini)
+await val(() => { window.__apex.store.S().settings.ai.localFirst = false; });
 await tap('#tab-rec');
 await sheetTop().locator('#lg-text').fill('Hoy 2 vasos de agua, de desayuno 1 porcion del bizcochuelo de ayer, almuerzo: hamburguesa 90g, brocoli 68g, ensalada rusa(papa con arvejas zanahoria y mayonesa, mucha papa) 450g');
 await sheetTop().locator('[data-l="analyze"]').click();
@@ -306,8 +324,9 @@ ok('Al cerrar, aparece el aviso de segundo plano', await page.locator('#bg-statu
 await shot('37-segundo-plano');
 await tap('.tab[data-tab="gym"]');
 await page.waitForSelector('#toast:has-text("Listo")', { timeout: 10000 }).catch(() => {});
-ok('Se guardó solo, sin cambiar de pantalla', (await val(() => window.__apex.ui.tab)) === 'gym' && await val(() => window.__apex.store.S().entries.some((e) => e.items.some((i) => /ensalada rusa/i.test(i.name)))), await page.locator('#toast').innerText());
+ok('Se guardó solo, sin cambiar de pantalla', (await val(() => window.__apex.ui.tab)) === 'gym' && await val(() => window.__apex.store.S().entries.some((e) => e.items.some((i) => /ensalada rusa/i.test(i.name)))), `${await page.locator('#toast').innerText()} · pestaña ${await val(() => window.__apex.ui.tab)} · ${await val(() => window.__apex.store.S().entries.flatMap((e) => e.items.map((i) => i.name)).filter((n) => /ensalada/i.test(n)).join(',') || 'sin ensalada')}`);
 await shot('38-guardado-fondo');
+await val(() => { window.__apex.store.S().settings.ai.localFirst = true; });
 
 // editar un alimento guardado: el botón Guardar aplica
 await tap('.tab[data-tab="hoy"]');

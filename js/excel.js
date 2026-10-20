@@ -514,6 +514,7 @@ export async function parseOldWorkbook(file) {
 
 /** Aplica lo importado: reemplaza las comidas de esos días y combina el resto. */
 export function applyImport(imp) {
+  store.safetySnapshot('antes de importar');
   const S = store.S();
   const dates = new Set(imp.entries.map((e) => e.date));
   S.entries = S.entries.filter((e) => !dates.has(e.date)).concat(imp.entries);

@@ -300,6 +300,8 @@ for (const f of BUILTIN_FOODS) f.builtin = true;
 
 // ---------- Índice y combinación con alimentos propios ----------
 let CUSTOM = [];
+let COMMUNITY = []; // aprendido de todas las personas que usan la app (ver community.js)
+let SAID_MAP = new Map(); // frase dicha → id del alimento (de la comunidad)
 let INDEX = new Map(BUILTIN_FOODS.map((f) => [f.id, f]));
 let UNIT_OVERRIDES = {}; // { foodId: { unidad: g } } aprendido de correcciones
 let SEARCH_CACHE = null;
@@ -307,10 +309,25 @@ let SEARCH_CACHE = null;
 export function setCustomFoods(list = [], overrides = {}) {
   CUSTOM = (list || []).filter((f) => f && f.id);
   UNIT_OVERRIDES = overrides || {};
+  rebuildIndex();
+}
+function rebuildIndex() {
   INDEX = new Map(BUILTIN_FOODS.map((f) => [f.id, f]));
+  for (const f of COMMUNITY) if (!INDEX.has(f.id)) INDEX.set(f.id, f);
   for (const f of CUSTOM) INDEX.set(f.id, f);
   SEARCH_CACHE = null;
+  PHRASES = null;
 }
+/**
+ * Conocimiento compartido: alimentos nuevos (con sus medidas) y frases con las que la gente los nombra.
+ * foods: [{ id, n, a[], k, p, c, f, s, fb, al, u{}, liq, n_users }] ; phrases: { "frase": id }
+ */
+export function setCommunityFoods(foods = [], phrases = {}) {
+  COMMUNITY = (foods || []).filter((f) => f && f.id && f.n && f.k >= 0).map((f) => ({ cat: 'comunidad', a: [], u: {}, s: 0, fb: 0, ...f, community: true, d: f.d || (Object.keys(f.u || {})[0] ? [Object.keys(f.u)[0], 1] : [f.liq ? 'ml' : 'g', 100]) }));
+  SAID_MAP = new Map(Object.entries(phrases || {}).map(([k, v]) => [norm(k), v]));
+  rebuildIndex();
+}
+export const communityCount = () => COMMUNITY.length;
 export const getFood = (id) => (id ? INDEX.get(id) || null : null);
 export const allFoods = () => Array.from(INDEX.values());
 export const customFoods = () => CUSTOM.slice();
@@ -441,7 +458,7 @@ export function searchFoods(query, { limit = 12, usage = {}, onlyCustom = false 
       if (sc > best) best = sc;
     }
     if (best > 0.2) {
-      const bonus = Math.min(0.06, Math.log10(1 + (usage[f.id] || 0)) * 0.03) + (f.builtin ? 0 : 0.03);
+      const bonus = Math.min(0.06, Math.log10(1 + (usage[f.id] || 0)) * 0.03) + (f.builtin ? 0 : f.community ? -0.02 : 0.03);
       out.push({ food: f, score: Math.min(1, best + bonus) });
     }
   }
@@ -465,7 +482,7 @@ let PHRASES = null;
 function protectPhrases(text) {
   if (!PHRASES) {
     PHRASES = [];
-    for (const f of BUILTIN_FOODS) for (const a of [f.n, ...(f.a || [])]) {
+    for (const f of [...BUILTIN_FOODS, ...COMMUNITY]) for (const a of [f.n, ...(f.a || [])]) {
       const n = norm(a);
       if (/ (con|y) /.test(n)) PHRASES.push(n);
     }
@@ -498,6 +515,8 @@ export function splitSegments(text, withJoiners = false) {
 }
 
 const JUNK = new Set(('de del la el los las en para pone poner pon pongas agrega agregar anota anotar registra que nada mas menos aprox o y e con sin no si pero era es fue fui fuimos estaba tenia hice hizo me mi te se lo le les un una unos unas uno al a total tome tomo comi corte corto hoy ayer anteayer manana noche tarde dia dias despues luego tambien ademas entonces bueno eh este grande grandes chico chica mediano mediana medianos medianas hondo poco mucho mucha muchos todo toda resto mitad entera entero pese peso realidad gimnasio gym agua vaso vasos pecho espalda pierna piernas brazos hombros torso entrenar entrene entreno porque cuando habia ahi otra otro solo creo como algo mas tipo onda tambien ya bien').split(' '));
+export const isJunkWord = (w) => JUNK.has(w);
+export const isUnitWord = (w) => UNIT_LOOKUP.has(w) || UNIT_LOOKUP.has(singular(w));
 export function isJunkText(text) {
   const toks = norm(text).split(' ').filter(Boolean);
   if (toks[0] === 'te' && toks.length <= 3) return false; // un té, té verde
@@ -564,8 +583,12 @@ export function parseLocal(text, { usage = {}, refs = null } = {}) {
   const items = [];
   const segs = splitSegments(text, true);
   const refList = refs ? Object.values(refs) : [];
-  for (const { text: seg, joiner } of segs) {
+  const CONT = /^(batido|licuado|shake|smoothie|bowl|tazon|ensalada|ensalada mixta|wrap|sandwich|sanguche|tostado)( proteico)?$/;
+  for (let si = 0; si < segs.length; si++) {
+    const { text: seg, joiner } = segs[si];
     const { text: foodText0, qty, unit, size, grams: explicitG, gUnit } = parseSegment(seg);
+    // "ensalada con tomate y lechuga", "batido con leche y banana": el recipiente no es un alimento aparte
+    if (CONT.test(norm(foodText0)) && segs[si + 1]?.joiner === 'con' && explicitG == null) continue;
     const prev = items[items.length - 1];
     // Cantidad suelta ("aprox 70 g", "un plato hondo") → corresponde al alimento anterior
     if ((!foodText0 || isJunkText(foodText0)) && (explicitG != null || qty != null || unit) && prev && prev.per100 && (explicitG != null ? !prev._explicitG : !prev._explicit)) {
@@ -587,24 +610,36 @@ export function parseLocal(text, { usage = {}, refs = null } = {}) {
       }
       if (refScore < 0.8) ref = null;
     }
-    const m = ref ? null : bestMatch(foodText, { usage });
+    const viaPhrase = !ref && SAID_MAP.get(norm(foodText)) ? getFood(SAID_MAP.get(norm(foodText))) : null;
+    const m = ref ? null : viaPhrase ? { food: viaPhrase, score: 0.95 } : bestMatch(foodText, { usage });
     if (!ref && (!m || m.score < 0.72)) {
       if (joiner === 'con' && prev) { prev.note = [prev.note, `Incluye "${foodText}" (revisá si cambia las calorías).`].filter(Boolean).join(' '); continue; }
       items.push({ name: capitalize(foodText), qty: qty ?? 1, unit: unit || 'porcion', grams: null, foodId: null, per100: null, confidence: 'baja', basis: 'sin_datos', note: 'No está en tu biblioteca: completá los valores o analizalo con IA cuando tengas conexión.', flags: ['sin_datos'] });
       continue;
     }
     if (ref) {
-      const it = { name: ref.name, qty: qty ?? 1, unit: unit || (ref.perUnit ? ref.perUnit.unit : 'g'), grams: null, foodId: ref.foodId || null, per100: null, liq: !!ref.liq, confidence: 'alta', basis: 'referencia', note: 'Igual que tu registro anterior.', flags: [], _explicit: qty != null || explicitG != null };
+      const it = { name: ref.name, qty: qty ?? 1, unit: unit || (ref.perUnit ? ref.perUnit.unit : ''), grams: null, foodId: ref.foodId || null, per100: null, liq: !!ref.liq, confidence: 'alta', basis: 'referencia', note: 'Igual que tu registro anterior.', flags: [], _explicit: qty != null || explicitG != null };
       if (ref.perUnit && (!unit || unit === ref.perUnit.unit || unit === 'porcion' || unit === 'unidad')) {
         const q = qty ?? 1;
         it.unit = ref.perUnit.unit; it.qty = q;
         it.fixed = { kcal: Math.round(ref.perUnit.kcal * q), p: round1(ref.perUnit.p * q), c: round1(ref.perUnit.c * q), f: round1(ref.perUnit.f * q), s: round1((ref.perUnit.s || 0) * q), fb: round1((ref.perUnit.fb || 0) * q) };
       } else if (ref.per100) {
         it.per100 = { ...ref.per100 };
-        if (explicitG != null) { it.grams = explicitG; if (qty == null) { it.qty = explicitG; it.unit = gUnit || 'g'; } }
+        if (!it.unit && explicitG == null) {
+          // "1 banana" sin unidad: la medida del registro anterior, o la unidad de la biblioteca
+          const ru = ref.units && Object.keys(ref.units)[0];
+          const lib = ru ? null : bestMatch(ref.name);
+          const lu = lib && lib.score >= 0.8 ? foodUnits(lib.food).unidad : null;
+          if (ru) it.unit = ru;
+          else if (lu) { it.unit = 'unidad'; it.grams = it.qty * lu; }
+          else if (qty != null && qty >= 15) it.unit = ref.liq ? 'ml' : 'g';
+          else { it.unit = 'porcion'; it.note = 'Sin medida: usé una porción típica, revisala.'; it.confidence = 'baja'; }
+        }
+        if (it.grams != null) { /* ya calculado */ } else if (explicitG != null) { it.grams = explicitG; if (qty == null) { it.qty = explicitG; it.unit = gUnit || 'g'; } }
         else if (it.unit === 'g' || it.unit === 'ml') it.grams = it.qty;
         else it.grams = (ref.units && ref.units[it.unit] ? ref.units[it.unit] : (GENERIC_UNIT_G[it.unit] || 100)) * it.qty;
       }
+      if (!it.unit) it.unit = 'g';
       items.push(it);
       continue;
     }
@@ -636,9 +671,9 @@ export function parseLocal(text, { usage = {}, refs = null } = {}) {
     const conf = ((qty != null || explicitG != null) && (own || explicitG != null || u === 'g' || u === 'ml')) ? (m.score > 0.9 ? 'alta' : 'media') : 'media';
     const item = {
       name: food.n, qty: q, unit: u, grams: grams ?? 0, foodId: food.id, per100: per100Of(food), liq: !!food.liq,
-      confidence: conf, basis: food.builtin ? 'biblioteca' : 'historial',
+      confidence: conf, basis: food.builtin ? 'biblioteca' : food.community ? 'comunidad' : 'historial',
       note: note || (!own && u && u !== 'g' && u !== 'ml' ? `Medida genérica: 1 ${unitLabel(u)} ≈ ${Math.round(gramsFor(food, 1, u) || 0)} g.` : ''), flags: [],
-      _explicit: qty != null || explicitG != null, _explicitG: explicitG != null,
+      _explicit: qty != null || explicitG != null, _explicitG: explicitG != null, match: round1(m.score * 100) / 100,
     };
     // Repetición del dictado ("bondiola, un plato de bondiola"): se queda la versión con cantidad
     const dup = items.findIndex((x) => x.foodId === item.foodId);
@@ -650,7 +685,6 @@ export function parseLocal(text, { usage = {}, refs = null } = {}) {
   }
   for (const it of items) { delete it._explicit; delete it._explicitG; }
   // "batido con proteína y leche": el contenedor sin datos se descarta si hay ingredientes
-  const CONT = /^(batido|licuado|shake|smoothie|bowl|tazon)( proteico)?$/;
   if (items.length > 1) return items.filter((it) => !(it.basis === 'sin_datos' && CONT.test(norm(it.name))));
   return items;
 }

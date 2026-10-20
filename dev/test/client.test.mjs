@@ -1,4 +1,4 @@
-import { callGemini } from '../../app/js/ai.js';
+import { callGemini } from '../../js/ai.js';
 let calls = [];
 function mock(handler) {
   calls = [];
@@ -97,3 +97,33 @@ await run('Respuesta bloqueada (status 0) en generateContent → prueba Interact
   if (u.includes(':generateContent')) throw new TypeError('Failed to fetch');
   return interOK;
 }, (r) => r && r.endpoint === 'interactions');
+
+// --- Consulta de respaldo: si el primer modelo tarda, se pregunta también a otro y gana el primero ---
+const slowFetch = (delays) => {
+  calls = [];
+  globalThis.fetch = (url, opts = {}) => {
+    calls.push({ url, method: opts.method || 'GET', body: opts.body ? JSON.parse(opts.body) : null });
+    if (String(url).includes('/models?')) return Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify(MODELS.body) });
+    const m = mdl(url, opts);
+    const d = delays[m] ?? 10;
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => resolve({ ok: d >= 0, status: d >= 0 ? 200 : 503, headers: { get: () => null }, text: async () => (d >= 0 ? JSON.stringify(genOK.body) : '{"error":{"code":503,"message":"overloaded"}}') }), Math.abs(d));
+      opts.signal?.addEventListener('abort', () => { clearTimeout(t); reject(Object.assign(new Error('abort'), { name: 'AbortError' })); });
+    });
+  };
+};
+for (const k of Object.keys(globalThis.localStorage || {})) delete globalThis.localStorage[k];
+const hedge = async (name, delays, check) => {
+  slowFetch(delays);
+  const a = { ...ai(), web: false, hedgeMs: 150 };
+  const t0 = Date.now();
+  try {
+    const r = await callGemini({ ai: a, system: 'S', parts: [{ text: 'hola' }], web: false });
+    const ms = Date.now() - t0;
+    console.log(`${check(r, ms) ? '✓' : '✗'} ${name}: modelo ${r.model} en ${ms} ms, intentos ${r.log.map((x) => `${x.model}:${x.msg}`).join(' | ')}`);
+  } catch (e) { console.log(`${check(null, 0, e) ? '✓' : '✗'} ${name}: error ${e.code} — ${e.message}`); }
+};
+await hedge('Primer modelo rápido → no se consulta otro', { 'gemini-3.5-flash': 30 }, (r) => r && r.model === 'gemini-3.5-flash' && calls.filter((c) => c.url.includes(':generate')).length === 1);
+await hedge('Primer modelo lento → contesta el respaldo y se cancela el lento', { 'gemini-3.5-flash': 3000, 'gemini-3.5-flash-lite': 40 }, (r, ms) => r && r.model === 'gemini-3.5-flash-lite' && ms < 1500);
+await hedge('Respaldo falla → se espera al primero', { 'gemini-3.5-flash': 600, 'gemini-3.5-flash-lite': -20 }, (r) => r && r.model === 'gemini-3.5-flash');
+await hedge('Primero falla rápido (503) → pasa al siguiente modelo como siempre', { 'gemini-3.5-flash': -20, 'gemini-3.5-flash-lite': 30 }, (r) => r && r.model === 'gemini-3.5-flash-lite');

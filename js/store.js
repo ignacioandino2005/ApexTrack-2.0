@@ -3,7 +3,7 @@
 import { todayISO, uid, addDays, dateRange, weekStart, round1, round0, deepClone, isISODate, norm, parseISO, daysBetween } from './util.js';
 import { setCustomFoods, calc, getFood, foodUnits, unitLabel, canonUnit, sanitizePer100 } from './foods.js';
 
-export const APP_VERSION = '2.3.0';
+export const APP_VERSION = '2.4.0';
 const SCHEMA = 1;
 const DB_NAME = 'apextrack';
 const DB_STORE = 'kv';
@@ -55,7 +55,7 @@ export function defaultState() {
       habits: deepClone(DEFAULT_HABITS),
       ai: { key: '', model: 'auto', precision: 'equilibrada', web: false, webV2: true, notes: '', endpoint: '', resolvedModel: '', modelsAt: 0, models: [] },
       ui: { theme: 'auto', glassMl: 250, slotTab: 'gym' },
-      backup: { lastAt: 0, cloudUrl: '', cloudToken: '', lastCloudAt: 0, lastCloudError: '' },
+      backup: { lastAt: 0, cloudUrl: '', cloudToken: '', lastCloudAt: 0, lastCloudError: '', drive: false, driveEmail: '', driveFolderId: '', lastCloudRichness: 0, needAuth: false },
     },
     entries: [],
     days: {},
@@ -211,13 +211,30 @@ export async function dailySnapshot() {
     const name = `snap-${todayISO()}.json`;
     await opfsWrite(name, state.data);
     const snaps = (await opfsList()).filter((n) => /^snap-\d{4}-\d{2}-\d{2}\.json$/.test(n)).sort();
-    for (const old of snaps.slice(0, Math.max(0, snaps.length - 4))) await opfsDelete(old);
+    for (const old of snaps.slice(0, Math.max(0, snaps.length - 7))) await opfsDelete(old);
   } catch { /* opcional */ }
 }
+/**
+ * Antes de reemplazar o borrar los datos (restaurar, importar, borrar todo) se guarda una copia
+ * de lo que había, por si fue un error. Se guardan las últimas 5.
+ */
+export async function safetySnapshot(reason = 'cambio') {
+  try {
+    if (richness(state.data) < 3) return false;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    await opfsWrite(`prev-${stamp}.json`, { ...state.data, _reason: reason });
+    const prev = (await opfsList()).filter((n) => /^prev-.+\.json$/.test(n)).sort();
+    for (const old of prev.slice(0, Math.max(0, prev.length - 5))) await opfsDelete(old);
+    return true;
+  } catch { return false; }
+}
 export async function listSnapshots() {
-  const names = (await opfsList()).filter((n) => /^snap-\d{4}-\d{2}-\d{2}\.json$/.test(n)).sort().reverse();
+  const names = (await opfsList()).filter((n) => /^(snap-\d{4}-\d{2}-\d{2}|prev-.+)\.json$/.test(n)).sort((a, b) => b.slice(5).localeCompare(a.slice(5)));
   const out = [];
-  for (const n of names) { const d = await opfsRead(n); if (d) out.push({ name: n, date: n.slice(5, 15), richness: richness(d), entries: (d.entries || []).length, updatedAt: d.updatedAt || 0, data: d }); }
+  for (const n of names) {
+    const d = await opfsRead(n);
+    if (d) out.push({ name: n, date: n.slice(5, 15), before: n.startsWith('prev-') ? (d._reason || 'cambio') : '', richness: richness(d), entries: (d.entries || []).length, updatedAt: d.updatedAt || 0, data: d });
+  }
   return out;
 }
 /** Para reemplazos intencionales (restaurar una copia, borrar todo). */
@@ -673,12 +690,14 @@ export function dayLabelStats(date) {
 }
 
 export function resetAll() {
+  safetySnapshot('antes de borrar todo');
   state.allowShrink = true;
   state.data = defaultState();
   syncFoods();
 }
 
 export function replaceAll(data) {
+  safetySnapshot('antes de restaurar');
   state.allowShrink = true;
   state.data = migrate(data);
   syncFoods();

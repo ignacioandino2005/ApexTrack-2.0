@@ -17,7 +17,8 @@ import { pickImage, scanBarcode, lookupBarcode, canScan } from './camera.js';
 import { renderDiario, renderProgreso, renderGym, openSettings, gymTimerTick, wireCharts, maybeBackupReminder, moreActions, maybeOnboard } from './more.js';
 import { renderEstudio, renderHabitos } from './study.js';
 import * as EN from './energy.js';
-import { scheduleCloud } from './backup.js';
+import { scheduleCloud, cloudPush } from './backup.js';
+import * as CM from './community.js';
 
 // ---------------------------------------------------------------------------
 // Estado de la interfaz
@@ -544,10 +545,22 @@ async function runPending() {
   return s;
 }
 
-async function runAnalysis(st) {
+async function runAnalysis(st, { forceAI = false } = {}) {
   stopVoice(st);
   const text = (st.text || '').trim();
   if (!text && !st.image && !st.audio) { toast('Escribí, dictá o adjuntá algo para analizar.'); return; }
+  // IA propia primero: si entiende todo el mensaje, se resuelve al instante y sin gastar consultas
+  const ai = store.S().settings.ai;
+  if (!forceAI && text && !st.image && !st.audio && ai.localFirst !== false) {
+    const ctx = AI.buildContext({ baseDate: st.date, baseMoment: st.moment });
+    const t0 = performance.now();
+    const ld = AI.analyzeOffline(text, ctx);
+    if (AI.localVerdict(ld, text, ctx).ok) {
+      ld.meta.auto = true; ld.meta.ms = performance.now() - t0;
+      showReview(st, ld);
+      return;
+    }
+  }
   st.busy = true; st.abort = false; st.background = false;
   const btn = st.sheet.foot.querySelector('[data-l="analyze"]');
   setBusy(btn, true, 'Analizando…');
@@ -652,7 +665,9 @@ function showReview(st, draft) {
   const meta = draft.meta || {};
   const metaHtml = meta.engine === 'ia'
     ? `<span>${icon('sparkle', 14)}${esc(prettyModel(meta.model))}</span>${meta.web ? `<span>${icon('globe', 14)}con búsqueda web</span>` : ''}<span>${icon('timer', 14)}${fmt((meta.ms || 0) / 1000, 1)} s</span>${(meta.tries || []).length > 1 ? `<span title="${esc(meta.tries.map((x, i) => `${i + 1}) ${x.model} ${x.web ? 'web' : 'sin web'} → ${x.status || 'sin respuesta'} ${x.msg}`).join(' | '))}">${icon('repeat', 14)}${meta.tries.length} intentos</span>` : ''}`
-    : `<span>${icon('bolt', 14)}Cálculo sin IA con tu biblioteca</span>`;
+    : meta.auto
+      ? `<span>${icon('bolt', 14)}Resuelto al instante por la IA propia</span>${store.S().settings.ai.key ? `<button class="btn ghost small" data-r="gemini">${icon('sparkle', 14)} Revisar con Gemini</button>` : ''}`
+      : `<span>${icon('bolt', 14)}Cálculo sin IA con tu biblioteca</span>`;
   const qs = draft.questions.map((q) => `<div class="rv-q">${icon('info', 18)}<span>${esc(q)}</span></div>`).join('');
   const warns = draft.warnings.map((w) => `<div class="flag">${icon('alert', 14)}<span>${esc(w)}</span></div>`).join('');
   const today = todayISO();
@@ -702,7 +717,7 @@ function showReview(st, draft) {
       const g = draft.groups[Number(b.dataset.g)]; const it = g.items[Number(b.dataset.i)];
       openItemEditor(it, {
         mode: 'draft', title: 'Ajustar alimento',
-        onSave: (upd) => { g.items[Number(b.dataset.i)] = upd; showReview(st, draft); },
+        onSave: (upd) => { upd._edited = true; if (it.said && !upd.said) upd.said = it.said; g.items[Number(b.dataset.i)] = upd; showReview(st, draft); },
         onDelete: () => { g.items.splice(Number(b.dataset.i), 1); if (!g.items.length) draft.groups.splice(Number(b.dataset.g), 1); showReview(st, draft); },
       });
     } else if (r === 'fix-g') {
@@ -722,6 +737,7 @@ function showReview(st, draft) {
     } else if (r === 'rm') { draft[b.dataset.k].splice(Number(b.dataset.i), 1); showReview(st, draft); }
     else if (r === 'back') { st.draft = null; renderComposer(st); }
     else if (r === 'save') saveDraft(st, draft);
+    else if (r === 'gemini') { st.draft = null; renderComposer(st); runAnalysis(st, { forceAI: true }); }
     else if (r === 'corr') await runCorrection(st, draft);
     else if (r === 'corr-mic') dictateInto(st, s.body.querySelector('#rv-corr'), b);
   };
@@ -786,7 +802,7 @@ async function runCorrection(st, draft) {
   if (!draft.raw) {
     // borrador hecho sin IA: se vuelve a analizar todo con la corrección
     st.text = `${st.text}\n${corr}`;
-    return runAnalysis(st);
+    return runAnalysis(st, { forceAI: true });
   }
   st.busy = true;
   const btn = st.sheet.body.querySelector('[data-r="corr"]');
@@ -806,6 +822,7 @@ async function runCorrection(st, draft) {
 
 function saveDraft(st, draft, { background = false } = {}) {
   const S = store.S();
+  try { CM.contribute(draft); } catch (e) { console.warn('aportes', e); }
   const snap = JSON.stringify({ entries: S.entries, days: S.days, body: S.body, usage: S.usage });
   let n = 0;
   for (const g of draft.groups) {
@@ -1071,7 +1088,7 @@ export function openFoodSearch({ date = ui.date, moment = null, onAdded = null, 
     } else {
       const nt = norm(term);
       hist.filter((h) => h.key.includes(nt)).slice(0, 6).forEach((h) => rows.push(optRow('h:' + h.key, h.name, 'De tu historial')));
-      searchFoods(term, { limit: 18, usage: store.S().usage }).forEach(({ food }) => rows.push(optRow('f:' + food.id, food.n, `${fmt(food.k)} kcal/100 ${food.liq ? 'ml' : 'g'}${food.builtin ? '' : ' · Mis alimentos'}`)));
+      searchFoods(term, { limit: 18, usage: store.S().usage }).forEach(({ food }) => rows.push(optRow('f:' + food.id, food.n, `${fmt(food.k)} kcal/100 ${food.liq ? 'ml' : 'g'}${food.builtin ? '' : food.community ? ' · Comunidad' : ' · Mis alimentos'}`)));
       rows.push(`<button class="opt" data-k="new"><span class="opt-main">${icon('plus', 20)}<span>Crear "${esc(term)}"<small>Cargá los valores de la etiqueta</small></span></span></button>`);
     }
     box.innerHTML = rows.join('');
@@ -1150,6 +1167,7 @@ async function boot() {
   if (p.get('accion')) history.replaceState({ tab: 'hoy' }, '', location.pathname);
   if (store.state.recovered) toast(`Recuperé tus datos desde la copia guardada en ${store.state.recovered}`, { ms: 6000 });
   scheduleCloud();
+  CM.startCommunity();
   maybeBackupReminder();
   maybeOnboard();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
@@ -1166,7 +1184,7 @@ async function boot() {
     let reloaded = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded) { reloaded = true; location.reload(); } });
   }
-  window.__apex = { store, AI, ui, render, openLogger };
+  window.__apex = { store, AI, CM, ui, render, openLogger, cloudPush };
 }
 
 boot();
