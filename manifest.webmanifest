@@ -98,5 +98,11 @@
         }
       ]
     }
+  },
+  "user_preferences": {
+    "color_scheme_dark": {
+      "theme_color": "#111512",
+      "background_color": "#111512"
+    }
   }
 }

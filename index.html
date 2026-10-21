@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>ApexTrack</title>
 <meta name="description" content="Registro de comidas, macros, agua, hábitos, gimnasio y progreso con IA.">
-<meta name="theme-color" content="#EEF1EC">
+<meta name="theme-color" content="#EEF1EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111512" media="(prefers-color-scheme: dark)">
 <meta name="color-scheme" content="light dark">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -18,7 +19,7 @@
 <link rel="stylesheet" href="css/app.css">
 <script>
   // tema antes de pintar (evita el destello claro en modo oscuro)
-  try { var t = JSON.parse(localStorage.getItem('apextrack_theme') || '""'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  try { var t = JSON.parse(localStorage.getItem('apextrack_theme') || '""'); if (t === 'light' || t === 'dark') { document.documentElement.dataset.theme = t; document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) { m.setAttribute('content', t === 'dark' ? '#111512' : '#EEF1EC'); }); } } catch (e) {}
   // tamaño del texto elegido (antes de pintar, para que no salte)
   try { var z = Number(localStorage.getItem('apextrack_zoom')); if (z && z !== 1) document.querySelector('meta[name="viewport"]').setAttribute('content', 'width=' + Math.round((screen.width || 400) / z) + ', initial-scale=' + z + ', minimum-scale=' + z + ', maximum-scale=' + z + ', viewport-fit=cover, interactive-widget=resizes-content'); } catch (e) {}
 </script>

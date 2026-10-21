@@ -1168,7 +1168,11 @@ function applyTheme() {
   else delete document.documentElement.dataset.theme;
   try { localStorage.setItem('apextrack_theme', JSON.stringify(t)); } catch { /* opcional */ }
   const dark = t === 'dark' || (t !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#111512' : '#EEF1EC');
+  // las barras del sistema (arriba y, en Android, la de los botones) toman este color
+  document.querySelectorAll('meta[name="theme-color"]').forEach((m) => {
+    const forMedia = (m.getAttribute('media') || '').includes('dark');
+    m.setAttribute('content', t === 'light' || t === 'dark' ? (dark ? '#111512' : '#EEF1EC') : (forMedia ? '#111512' : '#EEF1EC'));
+  });
   applyTextSize();
 }
 /** Tamaño del texto (Ajustes → Personalizar). 1 = el tamaño original de la app. */
