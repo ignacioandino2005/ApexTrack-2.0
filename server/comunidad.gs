@@ -36,6 +36,7 @@ function norm_(s) {
 function doPost(e) {
   let body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, error: 'json' }); }
+  if (body && body.op === 'plan') return json_(planBienvenida_(body));
   if (body && body.op === 'avisos') return json_(guardarAvisos_(body));
   if (body && body.op === 'baja') return json_(bajaAvisos_(body));
   if (!body || body.v !== 1 || !Array.isArray(body.records)) return json_({ ok: false, error: 'formato' });
@@ -75,7 +76,7 @@ function doGet(e) {
   if (op === 'estado') {
     const a = hoja_('aportes', COL_APORTES); const m = hoja_('mensajes', COL_MENSAJES);
     const av = hoja_('avisos', COL_AVISOS);
-    return json_({ ok: true, aportes: Math.max(0, a.getLastRow() - 1), mensajes: Math.max(0, m.getLastRow() - 1), avisos: Math.max(0, av.getLastRow() - 1), avisos_listos: !!PropertiesService.getScriptProperties().getProperty('vapid_pub') });
+    return json_({ ok: true, aportes: Math.max(0, a.getLastRow() - 1), mensajes: Math.max(0, m.getLastRow() - 1), avisos: Math.max(0, av.getLastRow() - 1), avisos_listos: !!PropertiesService.getScriptProperties().getProperty('vapid_pub'), bienvenida_lista: !!PropertiesService.getScriptProperties().getProperty('GEMINI_KEY') });
   }
   const props = PropertiesService.getScriptProperties();
   const id = props.getProperty('archivo');
@@ -329,4 +330,74 @@ function firmarJwt_(aud, privHex) {
     if (!s) continue;
     return datos + '.' + b64u_(aBytes_(r, 32).concat(aBytes_(s, 32)));
   }
+}
+
+// ===========================================================================
+// BIENVENIDA: la IA calcula las metas de una persona nueva con la clave del desarrollador.
+// La clave NO está en el código: se guarda en Configuración del proyecto → Propiedades de la
+// secuencia de comandos → GEMINI_KEY. Se usa solo para esto, como mucho 2 veces por teléfono y
+// 300 veces por día en total. Después cada persona usa su propia clave en la app.
+// ===========================================================================
+const PLAN_MAX_POR_TELEFONO = 2;
+const PLAN_MAX_POR_DIA = 300;
+const PLAN_MODELOS = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest'];
+const PLAN_PROMPT = 'Sos nutricionista deportivo. Con lo que cuenta la persona (español de Argentina), deducí sus datos y armá metas diarias realistas y seguras.\n'
+  + '- Calculá el gasto con Mifflin-St Jeor × nivel de actividad (sedentario 1,2 · ligero 1,375 · moderado 1,55 · alto 1,725).\n'
+  + '- Bajar de peso: déficit de 15-25 % (nunca menos de 1.200 kcal en mujeres ni 1.500 en hombres). Recomposición: déficit 5-10 %. Subir: superávit 8-15 %. Mantener: igual al gasto.\n'
+  + '- Proteína 1,6-2,2 g por kg (más alta si baja de peso o entrena fuerza). Grasas 0,8-1 g por kg (al menos 20 % de las calorías). Carbohidratos: el resto. Azúcares máximo 10 % de las calorías. Agua ≈ 35 ml por kg.\n'
+  + '- Si falta un dato, suponé uno razonable y nombralo en missing ("edad", "altura"…). No inventes condiciones médicas.\n'
+  + '- explanation: 2 o 3 frases simples, con voseo, con el gasto estimado, el objetivo y por qué esas metas. Si la persona menciona una enfermedad, embarazo o un objetivo extremo, recomendá consultar a un profesional.\n'
+  + 'Respondé solo el JSON.';
+const PLAN_SCHEMA = {
+  type: 'object',
+  properties: {
+    sex: { type: 'string', enum: ['m', 'f'] }, age: { type: ['number', 'null'] }, heightCm: { type: ['number', 'null'] }, weightKg: { type: ['number', 'null'] },
+    goalWeightKg: { type: ['number', 'null'] }, goal: { type: 'string', enum: ['bajar', 'recomp', 'mantener', 'subir'] },
+    level: { type: 'string', enum: ['sedentario', 'ligero', 'moderado', 'alto'] }, gymDays: { type: ['number', 'null'] },
+    kcal: { type: 'number' }, protein: { type: 'number' }, carbs: { type: 'number' }, fat: { type: 'number' }, sugarMax: { type: 'number' }, waterMl: { type: 'number' },
+    explanation: { type: 'string' }, missing: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['goal', 'level', 'kcal', 'protein', 'carbs', 'fat', 'explanation'],
+};
+
+function planBienvenida_(body) {
+  const props = PropertiesService.getScriptProperties();
+  const key = props.getProperty('GEMINI_KEY');
+  if (!key) return { ok: false, error: 'sin_clave' };
+  const inst = txt_(body.install, 40);
+  const texto = txt_(body.text, 1500).trim();
+  if (!/^ins_/.test(inst) || texto.length < 8) return { ok: false, error: 'datos' };
+  const cache = CacheService.getScriptCache();
+  const dia = 'plan_' + Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyyMMdd');
+  const hoy = Number(cache.get(dia) || 0);
+  if (hoy >= PLAN_MAX_POR_DIA) return { ok: false, error: 'cupo' };
+  const usos = Number(props.getProperty('plan_' + inst) || 0);
+  if (usos >= PLAN_MAX_POR_TELEFONO) return { ok: false, error: 'usado' };
+  const pedido = 'Hoy es ' + Utilities.formatDate(new Date(), 'America/Argentina/Buenos_Aires', 'yyyy-MM-dd') + '.\nLo que cuenta la persona:\n«' + texto + '»';
+  let ultimo = '';
+  for (const modelo of PLAN_MODELOS) {
+    for (const pensar of [true, false]) {
+      const cfg = { responseMimeType: 'application/json', responseJsonSchema: PLAN_SCHEMA };
+      if (pensar) cfg.thinkingConfig = { thinkingLevel: 'low' };
+      const res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models/' + modelo + ':generateContent', {
+        method: 'post', contentType: 'application/json', muteHttpExceptions: true, headers: { 'x-goog-api-key': key },
+        payload: JSON.stringify({ systemInstruction: { parts: [{ text: PLAN_PROMPT }] }, contents: [{ role: 'user', parts: [{ text: pedido }] }], generationConfig: cfg }),
+      });
+      const code = res.getResponseCode();
+      if (code === 200) {
+        try {
+          const j = JSON.parse(res.getContentText());
+          const t = ((((j.candidates || [])[0] || {}).content || {}).parts || []).filter((x) => !x.thought && x.text).map((x) => x.text).join('');
+          const plan = JSON.parse(t.replace(/^```(?:json)?\s*|```\s*$/g, ''));
+          props.setProperty('plan_' + inst, String(usos + 1));
+          cache.put(dia, String(hoy + 1), 21600);
+          return { ok: true, plan: plan, model: modelo };
+        } catch (err) { ultimo = 'json'; break; }
+      }
+      ultimo = String(code);
+      if (code === 400 && pensar) continue; // sin "thinking"
+      break; // otro modelo
+    }
+  }
+  return { ok: false, error: 'ia_' + ultimo };
 }

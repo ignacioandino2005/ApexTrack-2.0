@@ -123,6 +123,15 @@ export function dueNow(state, now = new Date(), shown = {}, windowMin = 40) {
     const n = evaluate(r, state, now);
     out.push({ r, n }); // n = null: ya estaba hecho (se marca igual como visto)
   }
+  // fin del ayuno intermitente en curso
+  const fa = state.fasting?.active;
+  if (fa && rs.fasting !== false) {
+    const end = fa.start + fa.goalH * 3600000;
+    const id = `ayuno_${fa.start}`;
+    if (now.getTime() >= end && now.getTime() - end < 6 * 3600000 && !shown[`${iso}|${id}`] && !shown[`${isoOf(new Date(end))}|${id}`]) {
+      out.push({ r: { id }, n: { tag: id, title: `¡Completaste tu ayuno de ${fa.goalH} h!`, body: 'Ya podés comer. Registrá tu primera comida para cerrarlo.', url: './?accion=ayuno', data: { id } } });
+    }
+  }
   return out;
 }
 
@@ -141,5 +150,7 @@ export function upcomingTimes(state, now = new Date(), days = 14) {
       out.push(t.getTime());
     }
   }
+  const fa = state.fasting?.active;
+  if (fa && rs.fasting !== false) { const end = fa.start + fa.goalH * 3600000; if (end > now.getTime()) out.push(end); }
   return [...new Set(out)].sort((a, b) => a - b);
 }

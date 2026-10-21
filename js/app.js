@@ -17,7 +17,9 @@ import { pickImage, scanBarcode, lookupBarcode, canScan, shrink } from './camera
 import { renderDiario, renderProgreso, renderGym, openSettings, gymTimerTick, wireCharts, maybeBackupReminder, moreActions, maybeOnboard } from './more.js';
 import { renderEstudio, renderHabitos } from './study.js';
 import * as EN from './energy.js';
-import { renderActividad, renderAgua, tabActions } from './tabs.js';
+import { renderActividad, tabActions } from './tabs.js';
+import { renderAyuno, fastingActions, fastingCard, fastingTick } from './fasting.js';
+import { renderIdeas, openIdeas, startIdeas } from './ideas.js';
 import { maybeAutoWeekly, weeklyCard, pendingWeekly, openWeekly, askWeekly } from './weekly.js';
 import { startReminders } from './notify.js';
 import { scheduleCloud, cloudPush } from './backup.js';
@@ -37,8 +39,8 @@ export const ui = {
   online: navigator.onLine !== false,
   jobs: [], // análisis que siguen en segundo plano
 };
-const TABS = ['hoy', 'diario', 'gym', 'estudio', 'habitos', 'actividad', 'agua', 'progreso'];
-export const SLOT_TABS = { gym: ['Gym', 'dumbbell'], estudio: ['Estudio', 'book'], habitos: ['Hábitos', 'check'], actividad: ['Actividad', 'walk'], agua: ['Agua', 'drop'] };
+const TABS = ['hoy', 'diario', 'gym', 'estudio', 'habitos', 'actividad', 'ayuno', 'ideas', 'progreso'];
+export const SLOT_TABS = { gym: ['Gym', 'dumbbell'], estudio: ['Estudio', 'book'], habitos: ['Hábitos', 'check'], actividad: ['Actividad', 'walk'], ayuno: ['Ayuno', 'timer'], ideas: ['Ideas', 'meal'] };
 function slotTab() { const t = store.S().settings.ui.slotTab; return SLOT_TABS[t] ? t : 'gym'; }
 function paintSlot() {
   const b = document.querySelector('.tab[data-slot]');
@@ -95,7 +97,8 @@ export function render() {
   else if (ui.tab === 'estudio') html = renderEstudio();
   else if (ui.tab === 'habitos') html = renderHabitos();
   else if (ui.tab === 'actividad') html = renderActividad();
-  else if (ui.tab === 'agua') html = renderAgua();
+  else if (ui.tab === 'ayuno') html = renderAyuno();
+  else if (ui.tab === 'ideas') html = renderIdeas();
   paintSlot();
   v.innerHTML = html;
   v.dataset.tab = ui.tab;
@@ -222,7 +225,7 @@ function viewHoy() {
       <div class="chips">${chips || '<span class="muted">Sin hábitos configurados.</span>'}</div>
       <div class="day-extras panel" style="margin-top:12px">
         <div class="kv"><span>${icon('dumbbell', 18)}Gimnasio</span>
-          <div class="seg-ctl" style="min-width:230px">${gymStates.map(([k, l]) => `<button class="${rec.gym === k ? 'on' : ''}" data-act="gym-day" data-v="${k}">${l}</button>`).join('')}</div></div>
+          <div class="seg-ctl" style="min-width:min(230px,100%);flex:1 1 230px;max-width:100%">${gymStates.map(([k, l]) => `<button class="${rec.gym === k ? 'on' : ''}" data-act="gym-day" data-v="${k}">${l}</button>`).join('')}</div></div>
         <div class="kv"><span>${icon('walk', 18)}Actividad</span><button class="weight-btn" data-act="activity-add">${en.items.length ? `${fmt(en.items.reduce((x, a) => x + a.kcal, 0))} kcal` : 'Agregar'}</button></div>
         <div class="kv"><span>${icon('scale', 18)}Peso en ayunas</span><button class="weight-btn" data-act="weight">${w && w.weight ? `${fmt(w.weight, 1)} kg` : 'Registrar'}</button></div>
         ${hours ? `<div class="kv"><span>${icon('book', 18)}${esc(hours.name)}</span><div class="study"><button class="step-btn" data-act="study" data-d="-0.5" aria-label="Menos">${icon('minus', 18)}</button><b>${fmt(rec.study || 0, 1)} h</b><button class="step-btn" data-act="study" data-d="0.5" aria-label="Más">${icon('plus', 18)}</button></div></div>` : ''}
@@ -235,11 +238,11 @@ function viewHoy() {
   const meals = entries.map((e) => mealCard(e)).join('');
   const mealsHtml = `
     <section class="section">
-      <div class="section-head"><h3>Comidas</h3>${entries.length ? `<button class="link" data-act="log">Agregar</button>` : ''}</div>
+      <div class="section-head"><h3>Comidas</h3><span style="display:flex;gap:14px">${d === today ? `<button class="link" data-act="ideas-open">¿Qué como?</button>` : ''}${entries.length ? `<button class="link" data-act="log">Agregar</button>` : ''}</span></div>
       ${pend}
       ${meals ? `<div class="meals">${meals}</div>` : `<div class="empty"><strong>${d === today ? 'Todavía no registraste nada hoy' : 'Sin comidas este día'}</strong>Tocá el micrófono y contá qué comiste, como en un mensaje.<div style="margin-top:14px"><button class="btn primary" data-act="log">${icon('mic', 20)} Registrar comida</button></div></div>`}
     </section>`;
-  return dateHtml + (d === today ? weeklyCard() : '') + (jobs ? `<div style="margin-top:10px">${jobs}</div>` : '') + hero + macros + mealsHtml + extras;
+  return dateHtml + (d === today ? weeklyCard() + fastingCard() : '') + (jobs ? `<div style="margin-top:10px">${jobs}</div>` : '') + hero + macros + mealsHtml + extras;
 }
 
 function mealCard(e) {
@@ -326,6 +329,7 @@ const actions = {
     if (img) openLogger({ date: todayISO(), image: img, text: 'Captura de mi reloj / app de salud' });
   },
   'weekly-open': () => openWeekly(pendingWeekly()),
+  'ideas-open': () => openIdeas(),
   'weekly-ask': () => askWeekly(),
   'water-custom': async () => {
     const r = await formSheet({ title: 'Agua', fields: [{ key: 'ml', label: 'Cantidad para sumar', type: 'number', suffix: 'ml', value: '' }, { key: 'total', label: 'O total del día', type: 'number', suffix: 'ml', value: store.day(ui.date).water || '' }] });
@@ -359,7 +363,7 @@ async function pickMoment(current, title = 'Comida') {
 export { pickMoment };
 
 export function registerActions(more) { Object.assign(actions, more); }
-Object.assign(actions, moreActions, tabActions);
+Object.assign(actions, moreActions, tabActions, fastingActions);
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
@@ -1165,6 +1169,19 @@ function applyTheme() {
   try { localStorage.setItem('apextrack_theme', JSON.stringify(t)); } catch { /* opcional */ }
   const dark = t === 'dark' || (t !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#111512' : '#EEF1EC');
+  applyTextSize();
+}
+/** Tamaño del texto (Ajustes → Personalizar). 1 = el tamaño original de la app. */
+export const TEXT_SIZES = { 0.88: 'Chico', 0.94: 'Un poco más chico', 1: 'Normal', 1.08: 'Grande', 1.16: 'Más grande', 1.25: 'Muy grande' };
+// Se usa la escala de la ventana (como el zoom del navegador): todo crece parejo y nada se corta.
+export function viewportFor(z) {
+  return `width=${Math.round((screen.width || 400) / z)}, initial-scale=${z}, minimum-scale=${z}, maximum-scale=${z}, viewport-fit=cover, interactive-widget=resizes-content`;
+}
+function applyTextSize() {
+  const z = Number(store.S().settings.ui.textScale) || 1;
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (meta) meta.setAttribute('content', z === 1 ? 'width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content' : viewportFor(z));
+  try { localStorage.setItem('apextrack_zoom', String(z)); } catch { /* opcional */ }
 }
 export { applyTheme };
 
@@ -1191,7 +1208,7 @@ async function boot() {
   window.addEventListener('offline', () => { ui.online = false; render(); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') store.flush(); else { checkDayRollover(); store.dailySnapshot(); } });
   window.addEventListener('pagehide', () => store.flush());
-  setInterval(() => { checkDayRollover(); gymTimerTick(); }, 1000);
+  setInterval(() => { checkDayRollover(); gymTimerTick(); if (ui.tab === 'ayuno') fastingTick(); }, 1000);
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
   // accesos directos del ícono, notificaciones y capturas compartidas
   const p = new URLSearchParams(location.search);
@@ -1203,6 +1220,7 @@ async function boot() {
   scheduleCloud();
   CM.startCommunity();
   startReminders();
+  startIdeas();
   try { if (maybeAutoWeekly()) render(); } catch (e) { console.warn('resumen semanal', e); }
   maybeBackupReminder();
   maybeOnboard();
@@ -1220,7 +1238,7 @@ async function boot() {
     let reloaded = false;
     navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded) { reloaded = true; location.reload(); } });
   }
-  window.__apex = { store, AI, CM, ui, render, openLogger, cloudPush };
+  window.__apex = { store, AI, CM, EN, ui, render, openLogger, cloudPush };
 }
 
 /** Acciones que llegan por la dirección (?accion=…): accesos del ícono, notificaciones y compartir. */
@@ -1236,6 +1254,8 @@ async function handleAction(p) {
     ui.tab = 'hoy'; setDate(today);
   } else if (a === 'peso') { ui.tab = 'hoy'; setDate(today); actions.weight(); }
   else if (a === 'gym' || a === 'estudio') { ui.tab = a === 'gym' ? 'hoy' : 'estudio'; setDate(today); }
+  else if (a === 'ayuno') go('ayuno');
+  else if (a === 'ideas') openIdeas();
   else if (a === 'resumen') { const r = pendingWeekly(); if (r) openWeekly(r); else askWeekly('pasada'); }
   else if (a === 'compartir') {
     try {

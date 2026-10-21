@@ -9,7 +9,7 @@ import { unitLabel, canonUnit, UNITS } from './foods.js';
 import { icon } from './icons.js';
 import { openSheet, toast, confirmDialog, pickOption, pickDate, promptText, formSheet, setBusy } from './ui.js';
 import { weekBars, weightLine, simpleLine } from './charts.js';
-import { ui, go, setDate, render, pickMoment, prettyModel, applyTheme, dayMarks, SLOT_TABS } from './app.js';
+import { ui, go, setDate, render, pickMoment, prettyModel, applyTheme, dayMarks, SLOT_TABS, TEXT_SIZES } from './app.js';
 import { studyActions, studyTick } from './study.js';
 import * as EN from './energy.js';
 import { openGoals } from './profile.js';
@@ -18,6 +18,7 @@ import * as BK from './backup.js';
 import * as CM from './community.js';
 import { openReminders } from './notify.js';
 import { askWeekly } from './weekly.js';
+import * as OB from './onboarding.js';
 
 const METRICS = {
   kcal: { label: 'Kcal', unit: 'kcal', dec: 0, goal: (g) => g.kcal, val: (d) => store.dayTotals(d).kcal },
@@ -505,6 +506,7 @@ export function openSettings(section = null) {
       ${row('habitos', 'pill', 'Hábitos y suplementos', S.settings.habits.map((h) => h.name).join(', '))}
       ${row('alimentos', 'library', 'Mis alimentos', `${S.customFoods.length} guardados`)}
       ${row('tema', S.settings.ui.theme === 'dark' ? 'moon' : 'sun', 'Tema', '', themeL[S.settings.ui.theme] || 'Automático')}
+      ${row('texto', 'search', 'Tamaño del texto', 'Más chico o más grande en toda la app', TEXT_SIZES[Number(S.settings.ui.textScale) || 1] || 'Normal')}
       ${row('vaso', 'glass', 'Tamaño del vaso', '', `${S.settings.ui.glassMl || 250} ml`)}
     </div>
     <div class="set-group"><h3>Tus datos</h3>
@@ -536,7 +538,11 @@ export function openSettings(section = null) {
     else if (k === 'momentos') editMoments();
     else if (k === 'habitos') editHabits();
     else if (k === 'alimentos') openMyFoods();
-    else if (k === 'tema') {
+    else if (k === 'texto') {
+      const cur = Number(S.settings.ui.textScale) || 1;
+      const v = await pickOption({ title: 'Tamaño del texto', value: cur, options: Object.entries(TEXT_SIZES).map(([z, label]) => ({ value: Number(z), label, sub: Number(z) === 1 ? 'El tamaño original' : `${Math.round(Number(z) * 100)} %` })) });
+      if (v) { S.settings.ui.textScale = v; applyTheme(); store.commit('texto'); }
+    } else if (k === 'tema') {
       const v = await pickOption({ title: 'Tema', value: S.settings.ui.theme, options: [{ value: 'auto', label: 'Automático', sub: 'Igual que el teléfono', icon: 'repeat' }, { value: 'light', label: 'Claro', icon: 'sun' }, { value: 'dark', label: 'Oscuro', icon: 'moon' }] });
       if (v) { S.settings.ui.theme = v; applyTheme(); store.commit('tema'); }
     } else if (k === 'vaso') {
@@ -571,7 +577,8 @@ export function openSettings(section = null) {
         { value: 'estudio', label: 'Estudio', sub: 'Cronómetro, pomodoro, materias, fechas de examen y pendientes', icon: 'book' },
         { value: 'habitos', label: 'Hábitos', sub: 'Rachas y calendario de cada hábito y suplemento', icon: 'check' },
         { value: 'actividad', label: 'Actividad', sub: 'Pasos, reloj inteligente, calorías gastadas y balance', icon: 'walk' },
-        { value: 'agua', label: 'Agua', sub: 'Progreso del día, botones rápidos, racha y semana', icon: 'drop' },
+        { value: 'ayuno', label: 'Ayuno intermitente', sub: 'Cronómetro 16:8, 18:6…, aviso al terminar e historial', icon: 'timer' },
+        { value: 'ideas', label: '¿Qué como?', sub: 'Ideas de tu historial, nuevas y de la IA según lo que te falta', icon: 'meal' },
       ] });
       if (v) { const old = S.settings.ui.slotTab || 'gym'; S.settings.ui.slotTab = v; if (ui.tab === old) ui.tab = v; store.commit('slot'); }
     }
@@ -1145,12 +1152,22 @@ export async function maybeOnboard() {
   const go1 = choice === 'nuevo';
   S.settings.onboarded = true; store.commit('onboard');
   if (!go1) return;
-  await editProfile();
-  const v = await pickOption({ title: '¿Qué pestaña querés tener?', value: S.settings.ui.slotTab || 'gym', options: [
-    { value: 'gym', label: 'Gimnasio', icon: 'dumbbell' }, { value: 'estudio', label: 'Estudio', icon: 'book' }, { value: 'habitos', label: 'Hábitos', icon: 'check' },
+  // 1) datos y metas (con la IA de bienvenida, una sola vez)
+  await OB.aboutYou();
+  // 2) pestaña a elección (el ayuno se sugiere a quien quiere bajar de peso)
+  const cut = EN.isCut();
+  const v = await pickOption({ title: '¿Qué pestaña querés tener a mano?', value: S.settings.ui.slotTab || (cut ? 'ayuno' : 'gym'), options: [
+    { value: 'gym', label: 'Gimnasio', sub: 'Rutinas, series y progresión', icon: 'dumbbell' },
+    { value: 'ayuno', label: 'Ayuno intermitente', sub: cut ? 'Recomendado para tu objetivo de bajar de peso' : 'Cronómetro 16:8 y aviso al terminar', icon: 'timer' },
+    { value: 'ideas', label: '¿Qué como?', sub: 'Ideas según lo que te falta del día', icon: 'meal' },
+    { value: 'actividad', label: 'Actividad', sub: 'Pasos, reloj y calorías gastadas', icon: 'walk' },
+    { value: 'habitos', label: 'Hábitos', sub: 'Rachas de hábitos y suplementos', icon: 'check' },
+    { value: 'estudio', label: 'Estudio', sub: 'Cronómetro, pomodoro y materias', icon: 'book' },
   ] });
   if (v) { S.settings.ui.slotTab = v; store.commit('slot'); }
-  openAISettings();
+  // 3) mini recorrido y 4) su propia clave
+  await OB.miniTour();
+  if ((await OB.keyIntro()) === 'paste') openAISettings();
 }
 
 // ===========================================================================

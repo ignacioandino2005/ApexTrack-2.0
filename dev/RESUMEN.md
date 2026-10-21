@@ -1,4 +1,4 @@
-# ApexTrack 2 — Resumen para continuar (versión 2.5.0, 20/10/2026)
+# ApexTrack 2 — Resumen para continuar (versión 2.6.0, 21/10/2026)
 
 Complementa el resumen de la 2.3.0. Leé esto antes de tocar el código.
 
@@ -26,8 +26,14 @@ Complementa el resumen de la 2.3.0. Leé esto antes de tocar el código.
 4. **Reloj inteligente**: no hay forma de leer Samsung Health / Mi Fitness / Health Connect desde una web (Google Fit cerró su API). Solución: compartir una captura a ApexTrack (Web Share Target en el manifiesto, `/compartir` lo atiende el service worker) o "Cargar captura" en Actividad; la IA lee pasos, km y calorías activas (`from_device`) y reemplaza la captura anterior del mismo día. También "Pasos de hoy" a mano.
 5. **"Widgets"**: Android no permite widgets de apps web. En su lugar: 4 accesos directos al mantener apretado el ícono (Dictar, Registrar, +1 vaso, Semana) y el recordatorio "Resumen del día" como notificación con botones.
 
+## Novedades de la 2.6.0
+1. **Bienvenida nueva** (`js/onboarding.js`): "Contame de vos" → la IA calcula las metas con la clave del desarrollador guardada en el Apps Script (`GEMINI_KEY` en Propiedades; op `plan` en `server/comunidad.gs`, 2 usos por teléfono, 300 por día; la clave nunca llega al teléfono ni al repositorio) → elegir pestaña (se sugiere Ayuno si el objetivo es bajar) → mini recorrido de 6 pantallas → cómo crear la clave propia. `profile.js` exporta `profileState`, `mergePlan` y `saveProfile`.
+2. **Pestañas**: se quitó Agua; nuevas **Ayuno** (`js/fasting.js`: protocolos 12:12 a 23:1, cronómetro, etapas, historial, racha, aviso push al completarlo vía `reminders-core.js`, tarjeta en Hoy para quien quiere bajar de peso) e **Ideas** (`js/ideas.js`: "¿Qué como ahora?" con lo que falta del día, historial, ideas nuevas con la biblioteca y de la IA con opciones nuevas; también en Hoy → "¿Qué como?").
+3. **Actividad**: pasos calculados desde la distancia con el largo del paso según altura y sexo (`EN.stepLength`, `EN.stepsOf`), meta de pasos configurable (`goals.steps`).
+4. **Tamaño del texto** (Ajustes → Personalizar): escala la ventana con el meta viewport (no `zoom`), 88 % a 125 %; 1 = tamaño original. Se arreglaron filas que no entraban en pantallas angostas.
+
 ## Pruebas (todas pasan salvo el caso Big Mac sin IA, que es esperable)
-`foods.test`, `offline.test`, `offline_extra`, `ai_pipeline.test`, `client.test` (incluye la consulta de respaldo), `local_first.test`, `server.test`, `backup.test`, `reminders.test`, `vapid.test`, `features.mjs` (22 controles, service worker real), `persist.mjs` (Drive y comunidad simulados, 22 controles), `e2e.mjs` (60 controles; el paso de la planilla V1 se omite si falta `ref/consolidado.xlsx`).
+`foods.test`, `offline.test`, `offline_extra`, `ai_pipeline.test`, `client.test` (incluye la consulta de respaldo), `local_first.test`, `server.test`, `backup.test`, `reminders.test`, `vapid.test`, `features.mjs` (42 controles, service worker real), `persist.mjs` (Drive y comunidad simulados, 22 controles), `e2e.mjs` (60 controles; el paso de la planilla V1 se omite si falta `ref/consolidado.xlsx`).
 
 ## Ideas pendientes
 - En el servidor: pegar el nuevo `comunidad.gs`, correr `instalarAvisos()` y publicar versión nueva.

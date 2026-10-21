@@ -144,6 +144,6 @@ export function insightsCard() {
   return `<section class="panel" style="margin-bottom:12px">
     <div class="kv"><span>${icon('sparkle', 18)}¿Cómo vengo?</span>${last ? `<button class="link" data-act="insight-open" data-id="${last.id}">Último: ${fmt(last.puntaje, last.puntaje % 1 ? 1 : 0)}/10 · ${esc(fmtDayShort(new Date(last.at).toLocaleDateString('sv-SE')))}</button>` : ''}</div>
     <p class="note" style="margin:6px 0 10px">La IA revisa tus registros y te dice qué va bien, qué va mal, qué mejorar y qué evitar.</p>
-    <div style="display:flex;gap:8px"><button class="btn" style="flex:1" data-act="weekly-ask">${icon('calendar', 18)} Resumen semanal</button><button class="btn primary" style="flex:1" data-act="insight-run">${icon('sparkle', 18)} Analizar con IA</button></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" style="flex:1 1 140px" data-act="weekly-ask">${icon('calendar', 18)} Resumen semanal</button><button class="btn primary" style="flex:1 1 140px" data-act="insight-run">${icon('sparkle', 18)} Analizar con IA</button></div>
   </section>`;
 }

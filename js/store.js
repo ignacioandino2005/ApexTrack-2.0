@@ -4,7 +4,7 @@ import { todayISO, uid, addDays, dateRange, weekStart, round1, round0, deepClone
 import { setCustomFoods, calc, getFood, foodUnits, unitLabel, canonUnit, sanitizePer100 } from './foods.js';
 import { defaultReminders } from './reminders-core.js';
 
-export const APP_VERSION = '2.5.0';
+export const APP_VERSION = '2.6.0';
 const SCHEMA = 1;
 const DB_NAME = 'apextrack';
 const DB_STORE = 'kv';
@@ -271,6 +271,8 @@ export function migrate(d) {
   if (!out.settings.weekly || typeof out.settings.weekly !== 'object') out.settings.weekly = { day: 1, ai: true };
   if (!out.settings.goals.steps) out.settings.goals.steps = 8000;
   if (!Array.isArray(out.weekly)) out.weekly = [];
+  if (out.settings.ui.slotTab === 'agua') out.settings.ui.slotTab = 'gym'; // la pestaña Agua se quitó en la 2.6
+  if (!out.fasting || typeof out.fasting !== 'object') out.fasting = { protocol: '16:8', active: null, history: [], dismissed: false };
   out.schema = SCHEMA;
   out.version = APP_VERSION;
   return out;

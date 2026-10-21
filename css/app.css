@@ -125,10 +125,10 @@ a { color: var(--accent); }
 
 /* ---------- Héroe de calorías ---------- */
 .hero { margin: 4px 0 22px; }
-.hero-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.hero-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .hero-num { font-size: 64px; line-height: .92; font-weight: 760; font-stretch: 118%; letter-spacing: -.035em; }
 .hero-goal { color: var(--ink-3); font-size: 15px; margin-top: 6px; }
-.hero-left { text-align: right; padding-bottom: 6px; }
+.hero-left { text-align: right; padding-bottom: 6px; margin-left: auto; }
 .hero-left b { display: block; font-size: 24px; font-weight: 700; font-stretch: 110%; letter-spacing: -.02em; line-height: 1; }
 .hero-left span { color: var(--ink-3); font-size: 13.5px; }
 .hero-left.over b { color: var(--warn); }
@@ -165,7 +165,7 @@ a { color: var(--accent); }
 .glass.on { color: var(--water); }
 .glass.on svg path { fill: color-mix(in oklab, var(--water) 30%, transparent); }
 .glass.add { color: var(--ink-3); border: 1.5px dashed var(--line); }
-.water-quick { display: flex; gap: 8px; margin-top: 10px; }
+.water-quick { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 
 /* ---------- Secciones, chips y botones ---------- */
 .section { margin: 26px 0 0; }
@@ -205,7 +205,7 @@ a { color: var(--accent); }
 
 /* ---------- Hábitos, gym del día, peso ---------- */
 .day-extras { display: grid; gap: 14px; }
-.kv { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.kv { display: flex; align-items: center; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; }
 .kv > span { color: var(--ink-2); font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px; }
 .weight-btn { min-height: 40px; padding: 0 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); font-weight: 650; font-variant-numeric: tabular-nums; }
 .study { display: flex; align-items: center; gap: 6px; }
@@ -556,3 +556,12 @@ div.field > span { display: block; margin-bottom: 6px; }
 .wb-ring > div { width: 140px; height: 140px; border-radius: 50%; background: var(--surface); display: grid; place-items: center; align-content: center; }
 .wb-ring b { font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; }
 .wb-ring small { color: var(--ink-3); font-size: 13px; margin-top: 4px; }
+
+/* Mini recorrido de bienvenida */
+.tour { text-align: center; padding: 8px 6px 4px; }
+.tour-ic { width: 84px; height: 84px; margin: 4px auto 14px; border-radius: 26px; display: grid; place-items: center; background: color-mix(in oklab, var(--accent) 14%, var(--surface)); color: var(--accent); }
+.tour h2 { margin: 0 0 8px; font-size: 22px; }
+.tour p { margin: 0 auto; max-width: 340px; color: var(--ink-2); line-height: 1.5; }
+.tour-dots { display: flex; gap: 6px; justify-content: center; margin-top: 18px; }
+.tour-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
+.tour-dots i.on { width: 20px; border-radius: 4px; background: var(--accent); }

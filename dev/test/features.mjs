@@ -34,10 +34,14 @@ const closeSheet = async () => { await sheetTop().locator('[data-sheet-close]').
 
 // configuración de prueba: servidor de la comunidad simulado
 await ctx.route('**/js/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: "export const GOOGLE_CLIENT_ID = '';\nexport const COMMUNITY_URL = 'https://comunidad.test/exec';\n" }));
-const comm = { posts: [] };
+const comm = { posts: [], plans: 0 };
 await ctx.route('https://comunidad.test/**', (r) => {
   const q = r.request();
-  if (q.method() === 'POST') { const b = JSON.parse(q.postData()); comm.posts.push(b); return r.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: { ok: true, horarios: (b.times || []).length } }); }
+  if (q.method() === 'POST') {
+    const b = JSON.parse(q.postData()); comm.posts.push(b);
+    if (b.op === 'plan') return r.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: comm.plans++ ? { ok: false, error: 'usado' } : { ok: true, plan: { sex: 'm', age: 28, heightCm: 178, weightKg: 84, goal: 'bajar', level: 'moderado', gymDays: 4, kcal: 2200, protein: 170, carbs: 210, fat: 70, sugarMax: 55, waterMl: 2950, explanation: 'Gastás unas 2.800 kcal: con 2.200 bajás unos 0,5 kg por semana.', missing: [] } } });
+    return r.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: { ok: true, horarios: (b.times || []).length } });
+  }
   const u = new URL(q.url());
   if (u.searchParams.get('op') === 'vapid') return r.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: { ok: true, key: 'BK96qkf--vc986EMsIeBrYpS2D1PQ5x8b1xvdPjfnLp9cyk9U2V6Kx3b3RAhqLM3TzwkSyNHTQ1NqzT1RcT6pX8' } });
   return r.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: { ok: true, foods: [], phrases: {} } });
@@ -48,14 +52,39 @@ await ctx.route('**/generativelanguage.googleapis.com/**', (r) => {
   aiCalls++;
   const body = JSON.stringify(r.request().postDataJSON());
   let out;
-  if (/coach que revisa el registro/.test(body)) out = { titulo: 'Buena semana', puntaje: 7.5, resumen: 'Vas bien con la proteína.', bien: ['Proteína alta'], mal: ['Poca agua'], mejorar: ['Tomá 2 vasos más'], cambiar: ['Cambiá la gaseosa por agua con gas: −200 kcal'], evitar: ['Picar después de cenar'], proximo_paso: 'Agua con cada comida' };
+  if (/Proponé comidas concretas/.test(body)) out = { options: [
+    { title: 'Pollo con arroz', why: 'Te faltan 60 g de proteína', isNew: false, items: [{ name: 'Pechuga de pollo', quantity: 200, unit: 'g', grams: 200, per100: { kcal: 165, protein: 31, carbs: 0, fat: 3.6 } }, { name: 'Arroz blanco cocido', quantity: 150, unit: 'g', grams: 150, per100: { kcal: 130, protein: 2.7, carbs: 28, fat: 0.3 } }] },
+    { title: 'Bowl de quinoa con salmón', why: 'Nueva: omega 3 y proteína', isNew: true, items: [{ name: 'Quinoa cocida', quantity: 150, unit: 'g', grams: 150, per100: { kcal: 120, protein: 4.4, carbs: 19, fat: 1.9, fiber: 2.8 } }, { name: 'Salmón rosado', quantity: 130, unit: 'g', grams: 130, per100: { kcal: 208, protein: 20, carbs: 0, fat: 13 } }] }] };
+  else if (/coach que revisa el registro/.test(body)) out = { titulo: 'Buena semana', puntaje: 7.5, resumen: 'Vas bien con la proteína.', bien: ['Proteína alta'], mal: ['Poca agua'], mejorar: ['Tomá 2 vasos más'], cambiar: ['Cambiá la gaseosa por agua con gas: −200 kcal'], evitar: ['Picar después de cenar'], proximo_paso: 'Agua con cada comida' };
   else out = { transcript: '', items: [], water: [], habits: [], gym: [], weight: [], skipped: [], questions: [], activity: [{ date: new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Argentina/San_Juan' }), type: 'caminata', steps: 9450, km: 6.8, kcal: 412, from_device: true, minutes: 75 }] };
   return r.fulfill({ json: { candidates: [{ content: { parts: [{ text: JSON.stringify(out) }] } }] } });
 });
 
 await page.goto('http://localhost:8766/');
 await page.waitForSelector('.hero');
-await page.waitForSelector('.sheet-wrap', { timeout: 3000 }).then(() => closeSheet()).catch(() => {});
+// --- Bienvenida: datos → metas con la IA de bienvenida → pestaña → recorrido → clave propia
+await page.waitForSelector('.sheet-wrap .opt[data-v="nuevo"]', { timeout: 5000 });
+await sheetTop().locator('.opt[data-v="nuevo"]').click(); await page.waitForTimeout(500);
+await sheetTop().locator('#ob-text').fill('Tengo 28 años, soy hombre, mido 1,78 y peso 84 kg. Voy al gimnasio 4 veces por semana y quiero bajar grasa.');
+await sheetTop().locator('[data-o="calc"]').click(); await page.waitForTimeout(1200);
+await shot('f00-bienvenida-metas');
+const prof = await val(() => ({ g: window.__apex.store.S().settings.goals, p: window.__apex.store.S().settings.profile, used: !!window.__apex.store.S().settings.onboardAI, key: window.__apex.store.S().settings.ai.key }));
+ok('Bienvenida: la IA calcula y guarda las metas sin clave propia', prof.g.kcal === 2200 && prof.g.p === 170 && prof.p.heightCm === 178 && prof.p.goal === 'bajar' && prof.used && !prof.key, `${prof.g.kcal} kcal · P ${prof.g.p}`);
+ok('La app nunca recibe la clave de bienvenida', !JSON.stringify(comm.posts).includes('AQ.') && comm.posts.some((x) => x.op === 'plan' && /^ins_/.test(x.install)));
+await sheetTop().locator('[data-o="ok"]').click(); await page.waitForTimeout(500);
+const tabOpts = await sheetTop().innerText();
+ok('Sugiere el ayuno a quien quiere bajar de peso', /Recomendado para tu objetivo de bajar de peso/.test(tabOpts));
+await sheetTop().locator('.opt[data-v="gym"]').click(); await page.waitForTimeout(500);
+await shot('f00b-recorrido');
+let slides = 0;
+while (await sheetTop().locator('[data-t="next"]').count() && slides < 10) { slides++; await sheetTop().locator('[data-t="next"]').click(); await page.waitForTimeout(250); }
+ok('Mini recorrido', slides === 6, `${slides} pantallas`);
+await shot('f00c-clave');
+ok('Al final lleva a crear la clave propia', /Último paso: tu clave de IA/.test(await sheetTop().innerText()) && await sheetTop().locator('a[href*="aistudio.google.com/apikey"]').count() === 1);
+await sheetTop().locator('[data-k="paste"]').click(); await page.waitForTimeout(500);
+ok('"Ya la copié" abre la configuración de la clave', await sheetTop().locator('#ai-key').count() === 1);
+await closeSheet();
+ok('La clave de bienvenida no se vuelve a usar', (await val(async () => { const m = await import('./js/onboarding.js'); return m.aboutYou ? true : false; })) && comm.plans === 1);
 // datos de la semana pasada y de hoy
 await val(() => {
   const st = window.__apex.store; const S = st.S();
@@ -91,6 +120,16 @@ ok('El aviso desaparece una vez visto', await page.locator('[data-act="weekly-op
 await page.locator('[data-act="settings"]').click(); await page.waitForTimeout(400);
 const firstRow = await sheetTop().locator('.set-group:has(h3:text("Personalizar")) [data-s]').first().getAttribute('data-s');
 ok('"Pestaña personalizable" es la primera de Personalizar', firstRow === 'slot', firstRow);
+// tamaño del texto
+const h0 = await page.locator('.view-title, .hero-num').first().boundingBox().catch(() => null);
+await sheetTop().locator('[data-s="texto"]').click(); await page.waitForTimeout(300);
+await sheetTop().locator('.opt[data-v="1.25"]').click(); await page.waitForTimeout(400);
+await shot('f03b-texto-grande');
+const vw = await val(() => ({ w: window.innerWidth, sw: document.documentElement.scrollWidth }));
+ok('Tamaño del texto: Muy grande (todo escala y no se corta)', Math.abs(vw.w - 412 / 1.25) < 3 && vw.sw <= vw.w + 1 && (await val(() => localStorage.getItem('apextrack_zoom'))) === '1.25', JSON.stringify(vw));
+await sheetTop().locator('[data-s="texto"]').click(); await page.waitForTimeout(300);
+await sheetTop().locator('.opt[data-v="1"]').click(); await page.waitForTimeout(300);
+ok('Volver a Normal deja el tamaño original', (await val(() => window.innerWidth)) === 412);
 // --- Recordatorios
 await sheetTop().locator('[data-s="avisos"]').click(); await page.waitForTimeout(400);
 await shot('f03-recordatorios');
@@ -126,20 +165,53 @@ ok('No lo repite', notes2 === notes.length);
 await page.locator('#slot-more').click(); await page.waitForTimeout(300);
 await shot('f06-flechita');
 const opts = await page.locator('#slot-menu [data-slot-go]').count();
-ok('La flechita despliega las 5 pestañas', opts === 5, String(opts));
-await page.locator('#slot-menu [data-slot-go="agua"]').click(); await page.waitForTimeout(400);
-ok('Abre Agua sin cambiar la principal', (await val(() => window.__apex.ui.tab)) === 'agua' && (await val(() => window.__apex.store.S().settings.ui.slotTab || 'gym')) === 'gym');
-await shot('f07-agua');
-await page.locator('#view [data-act="water-add"][data-ml="500"]').click(); await page.waitForTimeout(300);
-ok('Agua: sumar 500 ml a hoy', (await val(() => window.__apex.store.day(new Date().toLocaleDateString('sv-SE')).water)) === 500);
+ok('La flechita despliega las 6 pestañas (sin Agua)', opts === 6 && await page.locator('#slot-menu [data-slot-go="agua"]').count() === 0, String(opts));
+await page.locator('#slot-menu [data-slot-go="ayuno"]').click(); await page.waitForTimeout(400);
+ok('Abre Ayuno sin cambiar la principal', (await val(() => window.__apex.ui.tab)) === 'ayuno' && (await val(() => window.__apex.store.S().settings.ui.slotTab || 'gym')) === 'gym');
+await page.locator('#view [data-act="fast-start-ago"]').click(); await page.waitForTimeout(300);
+for (let i = 0; i < 28; i++) await sheetTop().locator('[data-a="+"]').click();
+await sheetTop().locator('[data-a="ok"]').click(); await page.waitForTimeout(500);
+await shot('f07-ayuno');
+const fa = await val(() => window.__apex.store.S().fasting);
+ok('Ayuno: empezar "hace 16 h" (16:8)', fa.active && Math.abs((Date.now() - fa.active.start) / 3600000 - 16) < 0.1 && fa.active.goalH === 16, `${((Date.now() - fa.active?.start) / 3600000).toFixed(1)} h`);
+ok('Muestra el cronómetro y que está completo', /Ayuno completado/.test(await page.locator('#view').innerText()));
+await val(async () => { (await navigator.serviceWorker.ready).active.postMessage('avisos'); });
+await page.waitForTimeout(1200);
+const fn = await val(async () => (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => n.title));
+ok('Aviso de ayuno completado', fn.some((t) => /Completaste tu ayuno de 16 h/.test(t)), fn.join(' | '));
+await page.locator('#view [data-act="fast-stop"]').click(); await page.waitForTimeout(400);
+ok('Termina y queda en el historial', (await val(() => window.__apex.store.S().fasting.history.length)) === 1 && !(await val(() => window.__apex.store.S().fasting.active)));
 await page.locator('.tab[data-tab="hoy"]').click(); await page.waitForTimeout(300);
 ok('Al volver, el botón muestra la principal', (await page.locator('.tab[data-slot]').getAttribute('data-tab')) === 'gym');
 await page.locator('.tab[data-slot]').click(); await page.waitForTimeout(300);
 ok('Tocar la pestaña (sin flechita) abre la principal', (await val(() => window.__apex.ui.tab)) === 'gym');
+// Actividad: pasos calculados desde la distancia y meta configurable
 await page.locator('#slot-more').click(); await page.waitForTimeout(200);
 await page.locator('#slot-menu [data-slot-go="actividad"]').click(); await page.waitForTimeout(400);
+await val(() => { const st = window.__apex.store; window.__apex.EN.addActivity(new Date().toLocaleDateString('sv-SE'), { type: 'caminata', km: 5 }); st.commit('x'); });
+await page.waitForTimeout(300);
+const actTxt = await page.locator('#view').innerText();
+ok('5 km caminados con 1,78 m → pasos calculados', /Pasos de hoy[\s\S]*6\.7\d\d/.test(actTxt) && /≈ 6\.7\d\d pasos/.test(actTxt), (actTxt.match(/≈ [\d.]+ pasos/) || [''])[0]);
+await page.locator('#view [data-act="steps-goal"]').click(); await page.waitForTimeout(300);
+await sheetTop().locator('input').fill('10000'); await sheetTop().locator('[data-r="1"]').click(); await page.waitForTimeout(300);
+ok('Meta de pasos configurable', (await val(() => window.__apex.store.S().settings.goals.steps)) === 10000 && /Meta 10\.000/.test(await page.locator('#view').innerText()));
 await shot('f08-actividad');
+await val(() => { const d = window.__apex.store.ensureDay(new Date().toLocaleDateString('sv-SE')); d.activity = []; window.__apex.store.commit('x'); });
 ok('Pestaña Actividad', /Pasos de hoy/.test(await page.locator('#view').innerText()));
+// ¿Qué como ahora?
+await page.locator('.tab[data-tab="hoy"]').click(); await page.waitForTimeout(300);
+await page.locator('[data-act="ideas-open"]').click(); await page.waitForTimeout(500);
+const idTxt = await sheetTop().innerText();
+await shot('f10-ideas');
+ok('¿Qué como?: lo que queda, historial y biblioteca', /Te queda hoy/.test(idTxt) && /De tu historial/.test(idTxt) && /Ideas nuevas con tu biblioteca/.test(idTxt) && (await sheetTop().locator('[data-src="hist"]').count()) >= 1 && (await sheetTop().locator('[data-src="lib"]').count()) === 3, idTxt.replace(/\s+/g, ' ').slice(0, 120));
+await sheetTop().locator('[data-idea="ai"]').click(); await page.waitForTimeout(1500);
+const aiTxt = await sheetTop().innerText();
+await shot('f11-ideas-ia');
+ok('Ideas de la IA (de siempre y nuevas)', (await sheetTop().locator('[data-src="ai"]').count()) === 2 && /Nueva/.test(aiTxt), aiTxt.replace(/\s+/g, ' ').slice(0, 140));
+const before = await val(() => window.__apex.store.dayTotals(new Date().toLocaleDateString('sv-SE')).items);
+await sheetTop().locator('[data-src="ai"]').first().click(); await page.waitForTimeout(400);
+ok('Agregar una idea al día', (await val(() => window.__apex.store.dayTotals(new Date().toLocaleDateString('sv-SE')).items)) > before);
+await closeSheet();
 
 // --- Captura del reloj compartida desde otra app (Web Share Target)
 const png = fs.readFileSync(path.join(ROOT, 'icons/icon-192.png')).toString('base64');

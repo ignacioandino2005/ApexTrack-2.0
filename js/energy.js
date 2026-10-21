@@ -40,13 +40,31 @@ export function bmr({ sex = 'm', kg = 70, cm = 170, age = 30 } = {}) {
   return round0(10 * kg + 6.25 * cm - 5 * age + (sex === 'f' ? -161 : 5));
 }
 
+/**
+ * Largo del paso (m) según la altura y el sexo: caminando ≈ 41,5 % de la altura (41,3 % en mujeres),
+ * corriendo ≈ 65 %. Se usa para pasar de distancia a pasos y al revés.
+ */
+export function stepLength(type = 'caminata', p = profile()) {
+  const h = (Number(p.heightCm) || 170) / 100;
+  if (type === 'correr') return h * 0.65;
+  return h * (p.sex === 'f' ? 0.413 : 0.415) * (type === 'caminata_rapida' ? 1.07 : 1);
+}
+const isWalkRun = (type) => type === 'caminata' || type === 'caminata_rapida' || type === 'correr';
+/** Pasos de una actividad: los que se cargaron, o calculados desde la distancia. */
+export function stepsOf(a) {
+  if (Number(a.steps) > 0) return Math.round(Number(a.steps));
+  if (Number(a.km) > 0 && isWalkRun(a.type)) return Math.round((Number(a.km) * 1000) / stepLength(a.type));
+  return 0;
+}
+export const stepsEstimated = (a) => !(Number(a.steps) > 0) && stepsOf(a) > 0;
+
 /** Calorías de una actividad (sin contar el basal, que ya está en la cuenta) */
 export function actKcal(a, kg) {
   if (Number(a.kcal) > 0 && a.manual) return round0(a.kcal);
   const t = ACTS[a.type] || ACTS.otro;
   const walk = a.type === 'caminata' || a.type === 'caminata_rapida';
   let km = Number(a.km) || 0;
-  if (!km && Number(a.steps) > 0 && (walk || a.type === 'correr')) km = (Number(a.steps) * (a.type === 'correr' ? 1.0 : 0.72)) / 1000;
+  if (!km && Number(a.steps) > 0 && (walk || a.type === 'correr')) km = (Number(a.steps) * stepLength(a.type)) / 1000;
   if (km > 0 && (walk || a.type === 'correr')) {
     // costo neto aproximado por km: caminar ≈ 0,5 kcal/kg/km; correr ≈ 0,9 kcal/kg/km
     return round0(km * kg * (a.type === 'correr' ? 0.9 : a.type === 'caminata_rapida' ? 0.6 : 0.5));
@@ -133,6 +151,7 @@ export function describeAct(a) {
   if (a.min) parts.push(`${a.min} min`);
   if (a.km) parts.push(`${round1(a.km)} km`);
   if (a.steps) parts.push(`${Number(a.steps).toLocaleString('es-AR')} pasos`);
+  else if (stepsEstimated(a)) parts.push(`≈ ${stepsOf(a).toLocaleString('es-AR')} pasos`);
   if (a.manual && a.kcal) parts.push(`${round0(a.kcal)} kcal medidas`);
   return `${a.source === 'reloj' ? 'Reloj' : t.label}${parts.length ? ' · ' + parts.join(' · ') : ''}${a.note && a.note !== 'reloj' ? ' · ' + a.note : ''}`;
 }

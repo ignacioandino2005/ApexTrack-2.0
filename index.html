@@ -19,6 +19,8 @@
 <script>
   // tema antes de pintar (evita el destello claro en modo oscuro)
   try { var t = JSON.parse(localStorage.getItem('apextrack_theme') || '""'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  // tamaño del texto elegido (antes de pintar, para que no salte)
+  try { var z = Number(localStorage.getItem('apextrack_zoom')); if (z && z !== 1) document.querySelector('meta[name="viewport"]').setAttribute('content', 'width=' + Math.round((screen.width || 400) / z) + ', initial-scale=' + z + ', minimum-scale=' + z + ', maximum-scale=' + z + ', viewport-fit=cover, interactive-widget=resizes-content'); } catch (e) {}
 </script>
 </head>
 <body>

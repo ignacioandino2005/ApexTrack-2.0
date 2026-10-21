@@ -76,7 +76,25 @@ propio teléfono decide qué mostrar (por ejemplo, no avisa del almuerzo si ya l
 En el teléfono: Ajustes → Recordatorios → activar. Si el servidor no está listo, los avisos funcionan igual
 mientras la app esté abierta o en segundo plano.
 
-## 4. Pruebas
+## 4. IA de bienvenida (metas de las personas nuevas)
+
+La primera vez que alguien abre la app, cuenta sus datos y la IA calcula sus metas con **la clave del
+desarrollador**. Esa clave **no va en el código** (el repositorio es público: cualquiera podría copiarla y
+Google desactiva las claves publicadas). Se guarda en el Apps Script y el teléfono nunca la ve:
+
+1. En el editor de Apps Script: **Configuración del proyecto** (ícono de engranaje, a la izquierda).
+2. Abajo, **Propiedades de la secuencia de comandos → Agregar propiedad**:
+   - Propiedad: `GEMINI_KEY`
+   - Valor: tu clave de Gemini.
+3. **Guardar**. No hace falta volver a implementar por esto.
+4. Para revisar: `URL?op=estado` tiene que mostrar `"bienvenida_lista": true`.
+
+Límites (en `server/comunidad.gs`): 2 usos por teléfono (`PLAN_MAX_POR_TELEFONO`) y 300 por día en total
+(`PLAN_MAX_POR_DIA`). Después cada persona carga su propia clave; "Calcular con IA" en Perfil y metas usa
+la clave de la persona, no la de bienvenida. Si la clave falta o se agota el cupo, la app ofrece completar
+los datos a mano.
+
+## 5. Pruebas
 
 Desde `dev/`: `npm install` una vez y después, dentro de `dev/test/`:
 
@@ -89,7 +107,7 @@ node local_first.test.mjs   # qué resuelve la IA propia sola
 node server.test.mjs        # servicio de la comunidad (simulado) de punta a punta
 node vapid.test.mjs         # firma de los avisos (verificada con WebCrypto) y envío
 node reminders.test.mjs     # qué recordatorio se muestra y cuál se saltea
-node features.mjs           # pestañas nuevas, recordatorios, resumen semanal, capturas compartidas (Chromium)
+node features.mjs           # bienvenida, pestañas, ayuno, ideas, recordatorios, resumen semanal, texto grande (Chromium)
 node persist.mjs            # pérdida y recuperación de datos, Drive y comunidad (Chromium)
 node e2e.mjs                # todos los botones y menús (Chromium)
 ```
