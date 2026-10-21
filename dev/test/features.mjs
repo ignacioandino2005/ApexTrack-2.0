@@ -39,7 +39,7 @@ await ctx.route('https://comunidad.test/**', (r) => {
   const q = r.request();
   if (q.method() === 'POST') {
     const b = JSON.parse(q.postData()); comm.posts.push(b);
-    if (b.op === 'plan') return r.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: comm.plans++ ? { ok: false, error: 'usado' } : { ok: true, plan: { sex: 'm', age: 28, heightCm: 178, weightKg: 84, goal: 'bajar', level: 'moderado', gymDays: 4, kcal: 2200, protein: 170, carbs: 210, fat: 70, sugarMax: 55, waterMl: 2950, explanation: 'Gastás unas 2.800 kcal: con 2.200 bajás unos 0,5 kg por semana.', missing: [] } } });
+    if (b.op === 'plan') return r.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: comm.plans++ ? { ok: false, error: 'usado' } : { ok: true, plan: { sex: 'm', age: 28, heightCm: 178, weightKg: 84, goal: 'bajar', level: 'moderado', gymDays: 4, kcal: 2200, protein: 170, carbs: 210, fat: 70, sugarMax: 55, waterMl: 2950, explanation: 'Hombre de 28 años, 1,78 m y 84 kg, entrena 4 veces por semana y quiere bajar grasa', missing: [], caution: '' } } });
     return r.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: { ok: true, horarios: (b.times || []).length } });
   }
   const u = new URL(q.url());
@@ -69,7 +69,8 @@ await sheetTop().locator('#ob-text').fill('Tengo 28 años, soy hombre, mido 1,78
 await sheetTop().locator('[data-o="calc"]').click(); await page.waitForTimeout(1200);
 await shot('f00-bienvenida-metas');
 const prof = await val(() => ({ g: window.__apex.store.S().settings.goals, p: window.__apex.store.S().settings.profile, used: !!window.__apex.store.S().settings.onboardAI, key: window.__apex.store.S().settings.ai.key }));
-ok('Bienvenida: la IA calcula y guarda las metas sin clave propia', prof.g.kcal === 2200 && prof.g.p === 170 && prof.p.heightCm === 178 && prof.p.goal === 'bajar' && prof.used && !prof.key, `${prof.g.kcal} kcal · P ${prof.g.p}`);
+ok('Bienvenida: la IA entiende los datos y la app calcula metas coherentes', prof.g.kcal === prof.g.p * 4 + prof.g.c * 4 + prof.g.f * 9 && prof.g.p === 145 && prof.p.heightCm === 178 && prof.p.goal === 'bajar' && prof.used && !prof.key, `${prof.g.kcal} kcal · P ${prof.g.p} · C ${prof.g.c} · G ${prof.g.f}`);
+ok('Muestra la cuenta de los macros', /= 2\.251 kcal/.test(await sheetTop().innerText()));
 ok('La app nunca recibe la clave de bienvenida', !JSON.stringify(comm.posts).includes('AQ.') && comm.posts.some((x) => x.op === 'plan' && /^ins_/.test(x.install)));
 await sheetTop().locator('[data-o="ok"]').click(); await page.waitForTimeout(500);
 const tabOpts = await sheetTop().innerText();
@@ -130,6 +131,17 @@ ok('Tamaño del texto: Muy grande (todo escala y no se corta)', Math.abs(vw.w - 
 await sheetTop().locator('[data-s="texto"]').click(); await page.waitForTimeout(300);
 await sheetTop().locator('.opt[data-v="1"]').click(); await page.waitForTimeout(300);
 ok('Volver a Normal deja el tamaño original', (await val(() => window.innerWidth)) === 412);
+// privacidad: contador anónimo e identificación opcional
+await sheetTop().locator('[data-s="quien"]').click(); await page.waitForTimeout(300);
+await sheetTop().locator('#id-name').fill('Caro'); await sheetTop().locator('#id-contact').fill('caro@mail.com');
+await sheetTop().locator('[data-i="on"]').click(); await page.waitForTimeout(800);
+const pings = comm.posts.filter((x) => x.op === 'ping');
+ok('Identificarse: se envía nombre y contacto solo si la persona lo elige', pings.length >= 1 && pings[pings.length - 1].ident?.name === 'Caro' && /^ins_/.test(pings[pings.length - 1].install), JSON.stringify(pings[pings.length - 1]).slice(0, 120));
+ok('Antes de elegirlo, los avisos de uso iban sin nombre', pings.slice(0, -1).every((x) => !x.ident));
+await sheetTop().locator('[data-s="quien"]').click(); await page.waitForTimeout(300);
+await sheetTop().locator('[data-i="off"]').click(); await page.waitForTimeout(800);
+const lastPing = comm.posts.filter((x) => x.op === 'ping').pop();
+ok('Dejar de compartir avisa para borrar el nombre', lastPing.ident === null);
 // --- Recordatorios
 await sheetTop().locator('[data-s="avisos"]').click(); await page.waitForTimeout(400);
 await shot('f03-recordatorios');

@@ -94,7 +94,18 @@ Límites (en `server/comunidad.gs`): 2 usos por teléfono (`PLAN_MAX_POR_TELEFON
 la clave de la persona, no la de bienvenida. Si la clave falta o se agota el cupo, la app ofrece completar
 los datos a mano.
 
-## 5. Pruebas
+## 5. Cuántas personas usan la app
+
+Cada teléfono avisa una vez por día que está activo (número al azar, versión, cuántas comidas y días
+registró, si usa la IA o los recordatorios). Se puede apagar en Ajustes → Privacidad.
+
+- **Cantidades** (público, sin nombres): `URL?op=estado` → `usuarios`: instalaciones, activos hoy / 7 / 30
+  días, con datos cargados, con más de 7 días registrados, que usan IA, identificados y versiones.
+- **Detalle** (solo vos): hoja **usuarios** de la planilla. Una fila por instalación: primera y última vez,
+  días activos, comidas y días registrados, y el nombre / contacto / mensaje **solo** de quienes eligieron
+  identificarse (Ajustes → Privacidad → "Decirle al desarrollador quién soy"). Si lo apagan, se borra.
+
+## 6. Pruebas
 
 Desde `dev/`: `npm install` una vez y después, dentro de `dev/test/`:
 
@@ -107,6 +118,7 @@ node local_first.test.mjs   # qué resuelve la IA propia sola
 node server.test.mjs        # servicio de la comunidad (simulado) de punta a punta
 node vapid.test.mjs         # firma de los avisos (verificada con WebCrypto) y envío
 node reminders.test.mjs     # qué recordatorio se muestra y cuál se saltea
+node goals.test.mjs         # metas: la suma de los macros da las calorías y valores razonables por caso
 node features.mjs           # bienvenida, pestañas, ayuno, ideas, recordatorios, resumen semanal, texto grande (Chromium)
 node persist.mjs            # pérdida y recuperación de datos, Drive y comunidad (Chromium)
 node e2e.mjs                # todos los botones y menús (Chromium)

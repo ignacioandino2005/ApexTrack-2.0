@@ -27,6 +27,7 @@ const ctx = {
   SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: (n) => sheets[n] || null, insertSheet: (n) => (sheets[n] = Sheet(n)) }) },
   ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (t) => ({ text: t, setMimeType() { return this; } }) },
   LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
+  Utilities: { formatDate: (d, tz, f) => d.toISOString().slice(0, 10).replace(/-/g, f === 'yyyyMMdd' ? '' : '-') },
   PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props[k] ?? null, setProperty: (k, v) => { props[k] = v; } }) },
   DriveApp: {
     createFile: (n, c) => { const id = 'f' + Object.keys(files).length; files[id] = c; return { getId: () => id, setContent: (x) => { files[id] = x; } }; },
@@ -62,7 +63,20 @@ ok('Arma el conocimiento', K.ok && K.users === 3 && !!pastel, `${K.foods.length}
 ok('Valores = mediana y coherentes', pastel && pastel.k === 165 && pastel.users === 3, pastel && `${pastel.k} kcal · ${JSON.stringify(pastel.u)}`);
 ok('Medida casera aprendida (porción ≈ 250 g)', pastel && Math.abs(pastel.u.porcion - 250) <= 10, pastel && JSON.stringify(pastel.u));
 ok('Frase → alimento', Object.keys(K.phrases).some((p) => /guiso de mondongo/.test(p)), JSON.stringify(K.phrases));
+// contador de uso e identificación opcional
+const ping = (b) => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ op: 'ping', app: '2.7.0', ...b }) } }).text);
+ping({ install: 'ins_a', items: 120, days: 20, ai: true, reminders: true });
+ping({ install: 'ins_b', items: 0, days: 0, ai: false });
+ping({ install: 'ins_c', items: 30, days: 8, ident: { on: true, name: 'Caro', contact: 'caro@mail.com', note: 'Me encanta' } });
+ping({ install: 'ins_a', items: 125, days: 21, ai: true });
+ok('Rechaza instalaciones inválidas', ping({ install: 'hack' }).ok === false);
 const st = JSON.parse(ctx.doGet({ parameter: { op: 'estado' } }).text);
+const u = st.usuarios || {};
+ok('Cuenta instalaciones, activas y con datos (sin repetir)', u.instalaciones === 3 && u.activos_hoy === 3 && u.con_datos === 2 && u.usan_ia === 1 && u.identificados === 1 && u.con_mas_de_7_dias_registrados === 2, JSON.stringify(u));
+ok('El estado público no muestra nombres ni contactos', !/Caro|caro@/.test(JSON.stringify(st)));
+ok('El nombre queda solo en la hoja del desarrollador', sheets.usuarios.rows.some((r) => r[9] === 'Caro' && r[10] === 'caro@mail.com'));
+ping({ install: 'ins_c', items: 31, days: 8, ident: null });
+ok('Si deja de compartir, se borra el nombre', sheets.usuarios.rows.every((r) => r[9] !== 'Caro'));
 ok('Estado', st.aportes === 3 && st.mensajes === 3, JSON.stringify(st));
 
 // --- la IA propia lo usa ---

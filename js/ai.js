@@ -1085,22 +1085,26 @@ const PLAN_SCHEMA = {
   type: 'object',
   properties: {
     sex: { type: 'string', enum: ['m', 'f'] }, age: { type: ['number', 'null'] }, heightCm: { type: ['number', 'null'] }, weightKg: { type: ['number', 'null'] },
-    goalWeightKg: { type: ['number', 'null'] },
+    goalWeightKg: { type: ['number', 'null'] }, weeks: { type: ['number', 'null'], description: 'Semanas en que quiere lograr el peso objetivo' }, rateKgMonth: { type: ['number', 'null'], description: 'Kg por mes que quiere subir o bajar, si lo dice' },
     goal: { type: 'string', enum: ['bajar', 'recomp', 'mantener', 'subir'] },
     level: { type: 'string', enum: ['sedentario', 'ligero', 'moderado', 'alto'] },
     gymDays: { type: ['number', 'null'] },
     kcal: { type: 'number' }, protein: { type: 'number' }, carbs: { type: 'number' }, fat: { type: 'number' },
     sugarMax: { type: 'number' }, waterMl: { type: 'number' },
-    explanation: { type: 'string' }, missing: { type: 'array', items: { type: 'string' } },
+    explanation: { type: 'string' }, missing: { type: 'array', items: { type: 'string' } }, caution: { type: 'string' },
   },
-  required: ['goal', 'level', 'kcal', 'protein', 'carbs', 'fat', 'explanation'],
+  required: ['sex', 'goal', 'level', 'explanation'],
 };
-const PLAN_PROMPT = `Sos nutricionista deportivo. Con lo que cuenta la persona (español de Argentina), deducí sus datos y armá metas diarias realistas y seguras.
-- Calculá el gasto con Mifflin-St Jeor × nivel de actividad (sedentario 1,2 · ligero 1,375 · moderado 1,55 · alto 1,725).
-- Bajar de peso: déficit de 15-25 % (nunca menos de 1.200 kcal en mujeres ni 1.500 en hombres). Recomposición: déficit 5-10 %. Subir: superávit 8-15 %. Mantener: igual al gasto.
-- Proteína 1,6-2,2 g por kg (más alta si baja de peso o entrena fuerza). Grasas 0,8-1 g por kg (al menos 20 % de las calorías). Carbohidratos: el resto. Azúcares máximo 10 % de las calorías. Agua ≈ 35 ml por kg.
-- Si falta un dato, suponé uno razonable y nombralo en missing ("edad", "altura"…). No inventes condiciones médicas.
-- explanation: 2 o 3 frases simples con el gasto estimado, el objetivo y por qué esas metas. Si la persona menciona una enfermedad, embarazo o un objetivo extremo, recomendá consultar a un profesional.
+const PLAN_PROMPT = `Sos nutricionista. Tu tarea principal es ENTENDER BIEN los datos de la persona a partir de lo que cuenta (español de Argentina, puede venir dictado): sexo, edad, altura, peso, peso objetivo, objetivo, nivel de actividad y días de gimnasio. La app calcula las metas con su propia fórmula a partir de esos datos.
+- Altura en cm (\"1,60\" = 160). Peso en kg. Si dice la edad o el año de nacimiento, devolvé la edad.
+- goal: bajar (bajar de peso o grasa), recomp (bajar grasa y ganar músculo, entrenando fuerza), mantener, subir (ganar peso o masa muscular).
+- level, según su vida diaria y ejercicio: sedentario (trabajo sentado, sin ejercicio o casi), ligero (camina o entrena 1 a 3 veces por semana), moderado (entrena 3 a 5 veces), alto (6 a 7 veces o trabajo físico pesado). Si no lo dice, sedentario o ligero según el contexto, y ponelo en missing.
+- gymDays: días por semana que entrena fuerza o va al gimnasio (0 si no va).
+- Peso objetivo y plazo: si dice "quiero llegar a 75 kg en 6 meses" → goalWeightKg 75 y weeks 26 (1 mes = 4,35 semanas). Si dice un ritmo y un plazo ("subir 2 o 3 kg por mes durante 5 meses") → rateKgMonth 2,5, weeks 22 y goalWeightKg = peso actual + 2,5 × 5. Si solo dice el ritmo, rateKgMonth y weeks null. Si no dice nada de eso, todo null. Anotá lo que pide aunque sea muy rápido: la app lo limita a un ritmo sano.
+- Completá también kcal, protein, carbs, fat, sugarMax y waterMl con una estimación razonable: déficit del 20 % para bajar (nunca menos de 1.200 kcal en mujeres ni 1.500 en hombres); proteína 1,2-1,6 g por kg (1,6-2,0 si entrena fuerza), usando el peso ajustado si tiene sobrepeso; grasas 25-35 % de las calorías; carbohidratos el resto, de modo que 4·proteína + 4·carbohidratos + 9·grasas = kcal.
+- missing: los datos que tuviste que suponer (\"edad\", \"altura\", \"nivel de actividad\"…). No inventes condiciones médicas.
+- caution: solo si menciona una enfermedad (diabetes, hipotiroidismo, hipertensión, renal…), embarazo, lactancia, menos de 18 años, un trastorno de la alimentación o un objetivo extremo: una frase recomendando hacerlo con un profesional. Si no, cadena vacía.
+- explanation: una frase con lo que entendiste (\"Mujer de 53 años, 1,60 m y 90 kg, sedentaria, quiere bajar de peso\").
 Respondé solo el JSON.`;
 
 export async function planGoals(text, { onStatus } = {}) {

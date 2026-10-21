@@ -31,7 +31,7 @@ export function aboutYou() {
   const st = profileState();
   let dict = null; let busy = false; let done = false;
   const draw = () => done ? `
-    <div class="banner">${icon('check', 20, 'ok')}<div class="grow"><b>Tus metas diarias</b><div class="muted" style="margin-top:4px">${esc(st.explanation)}</div></div></div>
+    <div class="banner">${icon('check', 20, 'ok')}<div class="grow"><b>Tus metas diarias</b><div class="muted" style="margin-top:4px;white-space:pre-line">${esc(st.explanation)}</div></div></div>
     <section class="panel" style="margin-top:12px">
       <div class="kv"><span>${icon('flame', 18)}Calorías</span><b>${fmt(st.kcal)} kcal</b></div>
       <div class="kv"><span>Proteína</span><b>${fmt(st.p)} g</b></div>
@@ -66,7 +66,9 @@ export function aboutYou() {
       if ((st.aiText || '').trim().length < 12) { toast('Contá al menos tu edad, altura, peso y qué querés lograr'); return; }
       busy = true; redraw();
       try {
-        mergePlan(st, await planShared(st.aiText.trim()));
+        const plan = await planShared(st.aiText.trim());
+        if (!EN.GOALS[plan.goal]) throw new Error('No pude entender tus datos: contá tu edad, altura, peso y qué querés lograr, o completalos a mano.');
+        mergePlan(st, plan);
         saveProfile(st);
         done = true;
       } catch (err) { toast(err.message, { kind: 'error', ms: 6000 }); }

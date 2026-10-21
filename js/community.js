@@ -130,10 +130,37 @@ export async function flush() {
 }
 export const queued = () => (lsGet(K_QUEUE) || []).length;
 
+// ---------------------------------------------------------------------------
+// Contador de uso: una vez por día, anónimo (número al azar). Si la persona eligió identificarse en
+// Ajustes → Privacidad, también va el nombre y el contacto que escribió.
+// ---------------------------------------------------------------------------
+export function privacy() {
+  const S = store.S();
+  if (!S.settings.privacy || typeof S.settings.privacy !== 'object') S.settings.privacy = { count: true, ident: { on: false, name: '', contact: '', note: '' } };
+  if (!S.settings.privacy.ident) S.settings.privacy.ident = { on: false, name: '', contact: '', note: '' };
+  return S.settings.privacy;
+}
+export async function pingUsage({ force = false, always = false } = {}) {
+  const pv = privacy();
+  if (!available() || (!always && pv.count === false && !pv.ident.on) || (typeof navigator !== 'undefined' && navigator.onLine === false)) return false;
+  const day = todayISO();
+  if (!force && lsGet('apextrack_ping') === day) return false;
+  const S = store.S();
+  const body = {
+    op: 'ping', install: installId(), app: store.APP_VERSION,
+    items: S.entries.reduce((n, e) => n + (e.items || []).length, 0), days: new Set(S.entries.map((e) => e.date)).size,
+    ai: !!S.settings.ai.key, reminders: !!S.settings.reminders?.on,
+    ident: pv.ident.on ? { on: true, name: pv.ident.name, contact: pv.ident.contact, note: pv.ident.note } : null,
+  };
+  const r = await fetch(COMMUNITY_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) }).then((x) => x.json()).catch(() => null);
+  if (r?.ok) lsSet('apextrack_ping', day);
+  return !!r?.ok;
+}
+
 /** Al abrir: usa lo descargado, manda lo pendiente y actualiza el conocimiento cada 2 días. */
 export function startCommunity() {
   loadKnowledge();
   if (!available()) return;
-  setTimeout(() => { flush().catch(() => {}); syncKnowledge().catch(() => {}); }, 12000);
+  setTimeout(() => { flush().catch(() => {}); syncKnowledge().catch(() => {}); pingUsage().catch(() => {}); }, 12000);
   window.addEventListener('online', () => { flush().catch(() => {}); });
 }

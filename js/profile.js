@@ -9,7 +9,7 @@ import { canDictate, startDictation } from './voice.js';
 
 const applyTargetsTo = (st, t) => { Object.assign(st, { kcal: t.kcal, p: t.p, c: t.c, f: t.f, sugarMax: t.sugarMax, waterMl: t.waterMl }); };
 const dataOkOf = (st) => Number(st.weightKg) > 25 && Number(st.heightCm) > 100;
-const refTargets = (st) => EN.calcTargets({ sex: st.sex, age: st.birthYear ? new Date().getFullYear() - Number(st.birthYear) : 30, cm: Number(st.heightCm), kg: Number(st.weightKg), level: st.level || 'moderado', goal: st.goal || 'mantener', gymDays: Number(st.gymDays) || 0 });
+const refTargets = (st) => EN.calcTargets({ sex: st.sex, age: st.birthYear ? new Date().getFullYear() - Number(st.birthYear) : 30, cm: Number(st.heightCm), kg: Number(st.weightKg), level: st.level || 'moderado', goal: st.goal || 'mantener', gymDays: Number(st.gymDays) || 0, goalKg: Number(st.goalWeight) || null, weeks: Number(st.goalWeeks) || null, rateKgMonth: Number(st.rateKgMonth) || null });
 
 /** Estado editable del perfil a partir de lo guardado. */
 export function profileState() {
@@ -18,29 +18,49 @@ export function profileState() {
   const g = { ...S.settings.goals };
   return {
     name: p.name || '', sex: p.sex || 'm', birthYear: p.birthYear || '', heightCm: p.heightCm || '', weightKg: store.latestWeight()?.kg || p.weightKg || '',
-    goalWeight: p.goalWeight || '', level: p.level || '', goal: p.goal || '', gymDays: g.gymDays ?? 3, rawGrains: p.rawGrains !== false,
+    goalWeight: p.goalWeight || '', goalWeeks: p.goalWeeks || '', rateKgMonth: p.rateKgMonth || '', level: p.level || '', goal: p.goal || '', gymDays: g.gymDays ?? 3, rawGrains: p.rawGrains !== false,
     kcal: g.kcal, p: g.p, c: g.c, f: g.f, sugarMax: g.sugarMax || '', waterMl: g.waterMl || 2500,
     aiText: '', explanation: '', dict: null,
   };
 }
 
-/** Pasa lo que propuso la IA a los datos y metas (con control contra el cálculo estándar). */
+/**
+ * Pasa lo que entendió la IA a los datos de la persona. Las metas NO las inventa la IA: las calcula la app
+ * con la fórmula (calcTargets), así son coherentes y la suma de los macros da exactamente las calorías.
+ */
 export function mergePlan(st, r) {
   if (r.sex === 'm' || r.sex === 'f') st.sex = r.sex;
   if (r.age > 10 && r.age < 100) st.birthYear = new Date().getFullYear() - Math.round(r.age);
   if (r.heightCm > 100 && r.heightCm < 230) st.heightCm = Math.round(r.heightCm);
   if (r.weightKg > 25 && r.weightKg < 300) st.weightKg = round1(r.weightKg);
   if (r.goalWeightKg > 25 && r.goalWeightKg < 300) st.goalWeight = round1(r.goalWeightKg);
+  st.goalWeeks = r.weeks > 0 && r.weeks < 520 ? Math.round(r.weeks) : '';
+  st.rateKgMonth = r.rateKgMonth > 0 && r.rateKgMonth < 20 ? round1(r.rateKgMonth) : '';
   if (EN.LEVELS[r.level]) st.level = r.level;
   if (EN.GOALS[r.goal]) st.goal = r.goal;
   if (r.gymDays >= 0 && r.gymDays <= 7) st.gymDays = Math.round(r.gymDays);
-  // control: si la IA se aleja mucho del cálculo estándar, se usa el cálculo
-  const ref = dataOkOf(st) ? refTargets(st) : null;
-  const t = { kcal: Math.round(r.kcal / 10) * 10, p: Math.round(r.protein), c: Math.round(r.carbs), f: Math.round(r.fat), sugarMax: Math.round(r.sugarMax || (r.kcal * 0.1) / 4), waterMl: Math.round((r.waterMl || (Number(st.weightKg) || 70) * 35) / 50) * 50 };
-  let note = '';
-  if (ref && Math.abs(t.kcal - ref.kcal) / ref.kcal > 0.25) { applyTargetsTo(st, ref); note = ` La propuesta de la IA (${fmt(t.kcal)} kcal) se alejaba mucho del cálculo estándar, así que usé ${fmt(ref.kcal)} kcal.`; }
-  else applyTargetsTo(st, t);
-  st.explanation = `${r.explanation || ''}${note}${r.missing?.length ? ` Supuse: ${r.missing.join(', ')}; podés corregirlo en Perfil y metas.` : ''}`;
+  const extra = [];
+  if (r.missing?.length) extra.push(`Supuse ${r.missing.join(', ')}: si no es así, corregilo en Perfil y metas.`);
+  if (r.caution) extra.push(String(r.caution));
+  if (dataOkOf(st)) {
+    const t = refTargets(st);
+    if (EN.GOALS[t.goal]) st.goal = t.goal;
+    applyTargetsTo(st, t);
+    st.explanation = [r.explanation ? `Entendí: ${String(r.explanation).trim().replace(/\.$/, '')}.` : '', t.explain, ...extra].filter(Boolean).join('\n');
+  } else {
+    // sin altura o peso no hay fórmula: se usan los números de la IA, pero cuadrados
+    const p = Math.round(r.protein) || 100; const f = Math.round(r.fat) || 50; const c = Math.max(0, Math.round(r.carbs) || 150);
+    applyTargetsTo(st, { kcal: p * 4 + c * 4 + f * 9, p, c, f, sugarMax: Math.round((p * 4 + c * 4 + f * 9) * 0.1 / 4), waterMl: Math.round((r.waterMl || 2500) / 250) * 250 });
+    st.explanation = [r.explanation || '', 'Contame tu altura y tu peso para calcularlo mejor.', ...extra].join(' ').trim();
+  }
+  return st;
+}
+
+/** Ajusta los carbohidratos para que proteína + carbohidratos + grasas den las calorías. */
+export function squareMacros(st) {
+  const k = Number(st.kcal) || 0; const p = Number(st.p) || 0; const f = Number(st.f) || 0;
+  const c = Math.round((k - p * 4 - f * 9) / 4);
+  if (c >= 0) st.c = c; else { st.c = 0; st.kcal = p * 4 + f * 9; }
   return st;
 }
 
@@ -53,6 +73,8 @@ export function saveProfile(st) {
   P.birthYear = Number(st.birthYear) > 1900 ? Math.round(st.birthYear) : null;
   if (Number(st.heightCm) >= 100 && Number(st.heightCm) <= 250) P.heightCm = Math.round(st.heightCm);
   P.goalWeight = Number(st.goalWeight) >= 25 && Number(st.goalWeight) <= 300 ? round1(st.goalWeight) : null;
+  P.goalWeeks = P.goalWeight && Number(st.goalWeeks) > 0 ? Math.round(st.goalWeeks) : null;
+  P.rateKgMonth = Number(st.rateKgMonth) > 0 ? round1(st.rateKgMonth) : null;
   P.level = EN.LEVELS[st.level] ? st.level : '';
   P.goal = EN.GOALS[st.goal] ? st.goal : '';
   P.rawGrains = !!st.rawGrains;
@@ -68,14 +90,18 @@ export function openGoals() {
   const st = profileState();
   const chips = (key, opts) => `<div class="chip-row wrap">${opts.map(([v, l]) => `<button class="chip ${String(st[key]) === String(v) ? 'on' : ''}" data-ch="${key}" data-v="${esc(v)}">${esc(l)}</button>`).join('')}</div>`;
   const num = (key, label, suffix = '', ph = '') => `<label class="field"><span>${esc(label)}</span><div class="input-wrap"><input class="input" data-n="${key}" inputmode="decimal" value="${st[key] === '' || st[key] == null ? '' : String(st[key]).replace('.', ',')}" placeholder="${esc(ph)}">${suffix ? `<em>${esc(suffix)}</em>` : ''}</div></label>`;
-  const sumLine = () => { const k = (Number(st.p) || 0) * 4 + (Number(st.c) || 0) * 4 + (Number(st.f) || 0) * 9; return `Tus macros suman <b>${fmt(k)}</b> kcal${st.kcal ? ` (meta ${fmt(st.kcal)})` : ''}.`; };
+  const sumLine = () => {
+    const k = (Number(st.p) || 0) * 4 + (Number(st.c) || 0) * 4 + (Number(st.f) || 0) * 9;
+    const off = st.kcal && Math.abs(k - st.kcal) > 10;
+    return `Proteína ${fmt((Number(st.p) || 0) * 4)} + carbohidratos ${fmt((Number(st.c) || 0) * 4)} + grasas ${fmt((Number(st.f) || 0) * 9)} = <b>${fmt(k)}</b> kcal${st.kcal ? ` (meta ${fmt(st.kcal)})` : ''}.${off ? ' <button class="link" data-x="square">Cuadrar con los carbohidratos</button>' : ' ✓'}`;
+  };
   const draw = () => `
     <div class="goal-ai panel" style="box-shadow:none;background:var(--surface-2)">
       <h3 class="sub-h" style="margin-top:0">${icon('sparkle', 16)} Contale a la IA y arma tus metas</h3>
       <div class="composer"><textarea class="input" id="g-ai" rows="4" placeholder="Ej.: Soy mujer, tengo 34 años, mido 1,62 y peso 70 kg. Voy al gimnasio 3 veces por semana y quiero bajar grasa sin perder músculo.">${esc(st.aiText)}</textarea>
       ${canDictate() ? `<button class="mic-big ${st.dict ? 'rec' : ''}" data-x="mic" aria-label="Dictar">${icon(st.dict ? 'stop' : 'mic', 22)}</button>` : ''}</div>
       <button class="btn primary" style="width:100%;margin-top:10px" data-x="ai">${icon('sparkle', 18)} Calcular con IA</button>
-      ${st.explanation ? `<div class="banner info" style="margin:12px 0 0">${icon('info', 20)}<div class="grow">${esc(st.explanation)}</div></div>` : ''}
+      ${st.explanation ? `<div class="banner info" style="margin:12px 0 0">${icon('info', 20)}<div class="grow" style="white-space:pre-line">${esc(st.explanation)}</div></div>` : ''}
     </div>
     <h3 class="sub-h">Tus datos</h3>
     <label class="field"><span>Nombre</span><input class="input" data-t="name" value="${esc(st.name)}"></label>
@@ -85,6 +111,7 @@ export function openGoals() {
       ${num('heightCm', 'Altura', 'cm', '170')}
       ${num('weightKg', 'Peso actual', 'kg', '70')}
       ${num('goalWeight', 'Peso objetivo', 'kg', 'opcional')}
+      ${num('goalWeeks', '¿En cuántas semanas?', 'sem', 'opcional')}
     </div>
     <div class="field"><span>Actividad habitual</span>${chips('level', Object.entries(EN.LEVELS).map(([k, v]) => [k, v.label]))}</div>
     <div class="field"><span>Objetivo</span>${chips('goal', Object.entries(EN.GOALS).map(([k, v]) => [k, v.label]))}</div>
@@ -114,6 +141,7 @@ export function openGoals() {
     if (b.dataset.ch) { st[b.dataset.ch] = b.dataset.v; redraw(); return; }
     const k = b.dataset.x;
     if (k === 'cancel') s.close();
+    else if (k === 'square') { squareMacros(st); redraw(); }
     else if (k === 'raw') { st.rawGrains = !st.rawGrains; b.querySelector('.switch').classList.toggle('on', st.rawGrains); }
     else if (k === 'mic') {
       if (st.dict) { stopDict(); redraw(); return; }
@@ -122,9 +150,10 @@ export function openGoals() {
       redraw();
     } else if (k === 'calc') {
       if (!dataOk()) { toast('Completá al menos altura y peso'); return; }
-      const t = EN.calcTargets({ sex: st.sex, age: st.birthYear ? new Date().getFullYear() - Number(st.birthYear) : 30, cm: Number(st.heightCm), kg: Number(st.weightKg), level: st.level || 'moderado', goal: st.goal || 'mantener', gymDays: Number(st.gymDays) || 0 });
+      const t = refTargets(st);
+      if (t.goal !== st.goal && EN.GOALS[t.goal]) st.goal = t.goal;
       applyTargets(t);
-      st.explanation = `Gasto estimado: ${fmt(t.tdee)} kcal por día (basal ${fmt(t.bmr)}). Para "${EN.GOALS[st.goal || 'mantener'].label.toLowerCase()}": ${fmt(t.kcal)} kcal con ${fmt(t.p)} g de proteína.`;
+      st.explanation = t.explain;
       redraw();
       s.body.querySelector('#g-sum')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } else if (k === 'ai') {
@@ -135,6 +164,7 @@ export function openGoals() {
       setBusy(b, true, 'Calculando…');
       try {
         const r = await AI.planGoals(text, { onStatus: (m) => { b.innerHTML = `<span class="spin"></span><span>${esc(m)}</span>`; } });
+        if (!r || !EN.GOALS[r.goal] || !(r.sex === 'm' || r.sex === 'f')) throw new Error('No pude entender tus datos: contá tu edad, altura, peso y qué querés lograr.');
         mergePlan(st, r);
         redraw();
         toast('Metas calculadas: revisalas y tocá Guardar');
@@ -143,11 +173,14 @@ export function openGoals() {
         toast(err.message || 'No se pudo calcular', { kind: 'error', ms: 5000 });
       }
     } else if (k === 'save') {
+      const sum0 = (Number(st.p) || 0) * 4 + (Number(st.c) || 0) * 4 + (Number(st.f) || 0) * 9;
+      const squared = st.kcal && Math.abs(sum0 - st.kcal) > Math.max(20, st.kcal * 0.02);
+      if (squared) squareMacros(st);
       saveProfile(st);
       s.close();
       const G = S.settings.goals;
       const sum = G.p * 4 + G.c * 4 + G.f * 9;
-      toast(Math.abs(sum - G.kcal) > G.kcal * 0.1 ? `Guardado. Ojo: tus macros suman ${fmt(sum)} kcal y la meta es ${fmt(G.kcal)}` : 'Perfil y metas guardados', { ms: 5000 });
+      toast(squared ? `Guardado. Ajusté los carbohidratos a ${fmt(G.c)} g para que los macros sumen ${fmt(sum)} kcal.` : 'Perfil y metas guardados', { ms: 5000 });
     }
   };
   s.body.addEventListener('click', handler);

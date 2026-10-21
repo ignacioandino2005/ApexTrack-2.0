@@ -36,6 +36,7 @@ function norm_(s) {
 function doPost(e) {
   let body;
   try { body = JSON.parse(e.postData.contents); } catch (err) { return json_({ ok: false, error: 'json' }); }
+  if (body && body.op === 'ping') return json_(registrarUso_(body));
   if (body && body.op === 'plan') return json_(planBienvenida_(body));
   if (body && body.op === 'avisos') return json_(guardarAvisos_(body));
   if (body && body.op === 'baja') return json_(bajaAvisos_(body));
@@ -76,7 +77,8 @@ function doGet(e) {
   if (op === 'estado') {
     const a = hoja_('aportes', COL_APORTES); const m = hoja_('mensajes', COL_MENSAJES);
     const av = hoja_('avisos', COL_AVISOS);
-    return json_({ ok: true, aportes: Math.max(0, a.getLastRow() - 1), mensajes: Math.max(0, m.getLastRow() - 1), avisos: Math.max(0, av.getLastRow() - 1), avisos_listos: !!PropertiesService.getScriptProperties().getProperty('vapid_pub'), bienvenida_lista: !!PropertiesService.getScriptProperties().getProperty('GEMINI_KEY') });
+    const uso = resumenUso_();
+    return json_({ ok: true, aportes: Math.max(0, a.getLastRow() - 1), mensajes: Math.max(0, m.getLastRow() - 1), avisos: Math.max(0, av.getLastRow() - 1), avisos_listos: !!PropertiesService.getScriptProperties().getProperty('vapid_pub'), bienvenida_lista: !!PropertiesService.getScriptProperties().getProperty('GEMINI_KEY'), usuarios: uso });
   }
   const props = PropertiesService.getScriptProperties();
   const id = props.getProperty('archivo');
@@ -341,23 +343,27 @@ function firmarJwt_(aud, privHex) {
 const PLAN_MAX_POR_TELEFONO = 2;
 const PLAN_MAX_POR_DIA = 300;
 const PLAN_MODELOS = ['gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest'];
-const PLAN_PROMPT = 'Sos nutricionista deportivo. Con lo que cuenta la persona (español de Argentina), deducí sus datos y armá metas diarias realistas y seguras.\n'
-  + '- Calculá el gasto con Mifflin-St Jeor × nivel de actividad (sedentario 1,2 · ligero 1,375 · moderado 1,55 · alto 1,725).\n'
-  + '- Bajar de peso: déficit de 15-25 % (nunca menos de 1.200 kcal en mujeres ni 1.500 en hombres). Recomposición: déficit 5-10 %. Subir: superávit 8-15 %. Mantener: igual al gasto.\n'
-  + '- Proteína 1,6-2,2 g por kg (más alta si baja de peso o entrena fuerza). Grasas 0,8-1 g por kg (al menos 20 % de las calorías). Carbohidratos: el resto. Azúcares máximo 10 % de las calorías. Agua ≈ 35 ml por kg.\n'
-  + '- Si falta un dato, suponé uno razonable y nombralo en missing ("edad", "altura"…). No inventes condiciones médicas.\n'
-  + '- explanation: 2 o 3 frases simples, con voseo, con el gasto estimado, el objetivo y por qué esas metas. Si la persona menciona una enfermedad, embarazo o un objetivo extremo, recomendá consultar a un profesional.\n'
-  + 'Respondé solo el JSON.';
+const PLAN_PROMPT = 'Sos nutricionista. Tu tarea principal es ENTENDER BIEN los datos de la persona a partir de lo que cuenta (español de Argentina, puede venir dictado): sexo, edad, altura, peso, peso objetivo, objetivo, nivel de actividad y días de gimnasio. La app calcula las metas con su propia fórmula a partir de esos datos.\n'
+  + '- Altura en cm (\"1,60\" = 160). Peso en kg. Si dice la edad o el año de nacimiento, devolvé la edad.\n'
+  + '- goal: bajar (bajar de peso o grasa), recomp (bajar grasa y ganar músculo, entrenando fuerza), mantener, subir (ganar peso o masa muscular).\n'
+  + '- level, según su vida diaria y ejercicio: sedentario (trabajo sentado, sin ejercicio o casi), ligero (camina o entrena 1 a 3 veces por semana), moderado (entrena 3 a 5 veces), alto (6 a 7 veces o trabajo físico pesado). Si no lo dice, sedentario o ligero según el contexto, y ponelo en missing.\n'
+  + '- gymDays: días por semana que entrena fuerza o va al gimnasio (0 si no va).\n'
+  + '- Peso objetivo y plazo: si dice "quiero llegar a 75 kg en 6 meses" → goalWeightKg 75 y weeks 26 (1 mes = 4,35 semanas). Si dice un ritmo y un plazo ("subir 2 o 3 kg por mes durante 5 meses") → rateKgMonth 2,5, weeks 22 y goalWeightKg = peso actual + 2,5 × 5. Si solo dice el ritmo, rateKgMonth y weeks null. Si no dice nada de eso, todo null. Anotá lo que pide aunque sea muy rápido: la app lo limita a un ritmo sano.\n'
+  + '- Completá también kcal, protein, carbs, fat, sugarMax y waterMl con una estimación razonable: déficit del 20 % para bajar (nunca menos de 1.200 kcal en mujeres ni 1.500 en hombres); proteína 1,2-1,6 g por kg (1,6-2,0 si entrena fuerza), usando el peso ajustado si tiene sobrepeso; grasas 25-35 % de las calorías; carbohidratos el resto, de modo que 4·proteína + 4·carbohidratos + 9·grasas = kcal.\n'
+  + '- missing: los datos que tuviste que suponer (\"edad\", \"altura\", \"nivel de actividad\"…). No inventes condiciones médicas.\n'
+  + '- caution: solo si menciona una enfermedad (diabetes, hipotiroidismo, hipertensión, renal…), embarazo, lactancia, menos de 18 años, un trastorno de la alimentación o un objetivo extremo: una frase recomendando hacerlo con un profesional. Si no, cadena vacía.\n'
+  + '- explanation: una frase con lo que entendiste (\"Mujer de 53 años, 1,60 m y 90 kg, sedentaria, quiere bajar de peso\").\n'
+  + 'Respondé solo el JSON.\n';
 const PLAN_SCHEMA = {
   type: 'object',
   properties: {
     sex: { type: 'string', enum: ['m', 'f'] }, age: { type: ['number', 'null'] }, heightCm: { type: ['number', 'null'] }, weightKg: { type: ['number', 'null'] },
-    goalWeightKg: { type: ['number', 'null'] }, goal: { type: 'string', enum: ['bajar', 'recomp', 'mantener', 'subir'] },
+    goalWeightKg: { type: ['number', 'null'] }, weeks: { type: ['number', 'null'], description: 'Semanas en que quiere lograr el peso objetivo' }, rateKgMonth: { type: ['number', 'null'], description: 'Kg por mes que quiere subir o bajar, si lo dice' }, goal: { type: 'string', enum: ['bajar', 'recomp', 'mantener', 'subir'] },
     level: { type: 'string', enum: ['sedentario', 'ligero', 'moderado', 'alto'] }, gymDays: { type: ['number', 'null'] },
     kcal: { type: 'number' }, protein: { type: 'number' }, carbs: { type: 'number' }, fat: { type: 'number' }, sugarMax: { type: 'number' }, waterMl: { type: 'number' },
-    explanation: { type: 'string' }, missing: { type: 'array', items: { type: 'string' } },
+    explanation: { type: 'string' }, missing: { type: 'array', items: { type: 'string' } }, caution: { type: 'string' },
   },
-  required: ['goal', 'level', 'kcal', 'protein', 'carbs', 'fat', 'explanation'],
+  required: ['sex', 'goal', 'level', 'explanation'],
 };
 
 function planBienvenida_(body) {
@@ -400,4 +406,48 @@ function planBienvenida_(body) {
     }
   }
   return { ok: false, error: 'ia_' + ultimo };
+}
+
+// ===========================================================================
+// USO DE LA APP: cada teléfono avisa una vez por día que está activo (número al azar, versión y
+// cantidad de comidas registradas). Si la persona eligió identificarse en Ajustes, también manda el
+// nombre y el contacto que escribió. Los nombres quedan SOLO en la hoja "usuarios" (la ve el
+// desarrollador); ?op=estado, que es público, muestra únicamente cantidades.
+// ===========================================================================
+const COL_USUARIOS = ['instalacion', 'primera_vez', 'ultima_vez', 'version', 'dias_activos', 'comidas_registradas', 'dias_con_registro', 'usa_ia', 'recordatorios', 'nombre', 'contacto', 'mensaje'];
+
+function registrarUso_(body) {
+  const inst = txt_(body.install, 40);
+  if (!/^ins_/.test(inst)) return { ok: false, error: 'datos' };
+  const ahora = new Date();
+  const lock = LockService.getScriptLock(); lock.waitLock(20000);
+  try {
+    const h = hoja_('usuarios', COL_USUARIOS);
+    const fila = buscarFila_(h, inst);
+    const prev = fila ? h.getRange(fila, 1, 1, COL_USUARIOS.length).getValues()[0] : null;
+    const otroDia = !prev || Utilities.formatDate(new Date(prev[2]), 'America/Argentina/Buenos_Aires', 'yyyyMMdd') !== Utilities.formatDate(ahora, 'America/Argentina/Buenos_Aires', 'yyyyMMdd');
+    const id = body.ident && body.ident.on ? body.ident : null;
+    const datos = [inst, prev ? prev[1] : ahora, ahora, txt_(body.app, 12), (prev ? Number(prev[4]) || 0 : 0) + (otroDia ? 1 : 0),
+      num_(body.items, 1e6), num_(body.days, 1e5), body.ai ? 'sí' : 'no', body.reminders ? 'sí' : 'no',
+      id ? txt_(id.name, 60) : '', id ? txt_(id.contact, 80) : '', id ? txt_(id.note, 300) : ''];
+    if (fila) h.getRange(fila, 1, 1, COL_USUARIOS.length).setValues([datos]);
+    else h.getRange(h.getLastRow() + 1, 1, 1, COL_USUARIOS.length).setValues([datos]);
+  } finally { lock.releaseLock(); }
+  return { ok: true };
+}
+
+/** Solo cantidades (esto es público): nunca nombres ni contactos. */
+function resumenUso_() {
+  const h = hoja_('usuarios', COL_USUARIOS);
+  if (h.getLastRow() < 2) return { instalaciones: 0 };
+  const filas = h.getRange(2, 1, h.getLastRow() - 1, COL_USUARIOS.length).getValues();
+  const ahora = Date.now(); const dia = 86400000;
+  const activos = (n) => filas.filter((f) => ahora - new Date(f[2]).getTime() < n * dia).length;
+  const porVersion = {};
+  filas.forEach((f) => { if (ahora - new Date(f[2]).getTime() < 30 * dia) porVersion[f[3]] = (porVersion[f[3]] || 0) + 1; });
+  return {
+    instalaciones: filas.length, activos_hoy: activos(1), activos_7_dias: activos(7), activos_30_dias: activos(30),
+    con_datos: filas.filter((f) => Number(f[5]) > 0).length, con_mas_de_7_dias_registrados: filas.filter((f) => Number(f[6]) >= 7).length,
+    usan_ia: filas.filter((f) => f[7] === 'sí').length, identificados: filas.filter((f) => f[9] || f[10]).length, versiones_30_dias: porVersion,
+  };
 }

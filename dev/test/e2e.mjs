@@ -41,7 +41,7 @@ await page.route('**/generativelanguage.googleapis.com/**', async (route) => {
   if (/bondiola/.test(txt)) out = MOCKS.t2;
   else if (/ensalada rusa/.test(txt)) out = MOCKS.t3;
   else if (/Traviata/.test(txt) && !/Respondé en JSON/.test(sys)) out = MOCKS.t1;
-  else if (/Sos nutricionista deportivo\. Con lo que cuenta/.test(sys)) out = { sex: 'f', age: 34, heightCm: 162, weightKg: 70, goal: 'bajar', level: 'moderado', gymDays: 3, kcal: 1650, protein: 140, carbs: 160, fat: 55, sugarMax: 41, waterMl: 2450, explanation: 'Gasto estimado 2100 kcal; déficit moderado.', missing: [] };
+  else if (/Sos nutricionista\. Tu tarea principal/.test(sys)) out = { sex: 'f', age: 34, heightCm: 162, weightKg: 70, goal: 'bajar', level: 'moderado', gymDays: 3, kcal: 1650, protein: 140, carbs: 160, fat: 55, sugarMax: 41, waterMl: 2450, explanation: 'Gasto estimado 2100 kcal; déficit moderado.', missing: [] };
   else if (/coach que revisa el registro/.test(sys)) out = { titulo: 'Vas bien', puntaje: 7, resumen: 'Buen trabajo.', bien: ['Proteína alta'], mal: ['Poca agua'], mejorar: ['Tomá más agua'], evitar: ['Helado a la noche'], proximo_paso: 'Agua con cada comida' };
   else if (/Respondé en JSON/.test(sys)) out = { kcal: 432, fuente: 'bagley' };
   else if (/"ok"/.test(txt) || /modelo/.test(txt)) out = { ok: true, modelo: 'gemini-3.8-flash' };
@@ -434,7 +434,7 @@ await page.waitForSelector('.goal-ai .banner', { timeout: 20000 }).catch(() => {
 await shot('51-metas-ia');
 await sheetTop().locator('[data-x="save"]').click(); await page.waitForTimeout(500);
 const gl = await val(() => ({ g: window.__apex.store.S().settings.goals, p: window.__apex.store.S().settings.profile }));
-ok('Metas calculadas con IA y guardadas', gl.g.kcal === 1650 && gl.p.goal === 'bajar' && gl.p.sex === 'f', JSON.stringify(gl.g));
+ok('Metas calculadas con IA y guardadas (y la suma cierra)', gl.g.kcal === gl.g.p * 4 + gl.g.c * 4 + gl.g.f * 9 && gl.g.kcal < 1900 && gl.g.p >= 100 && gl.g.p <= 135 && gl.p.goal === 'bajar' && gl.p.sex === 'f' && gl.p.heightCm === 162, JSON.stringify(gl.g));
 await closeSheet();
 await page.evaluate(() => window.scrollTo(0, 0));
 await shot('52-hoy-deficit');

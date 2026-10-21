@@ -1,4 +1,4 @@
-# ApexTrack 2 — Resumen para continuar (versión 2.6.0, 21/10/2026)
+# ApexTrack 2 — Resumen para continuar (versión 2.7.0, 21/10/2026)
 
 Complementa el resumen de la 2.3.0. Leé esto antes de tocar el código.
 
@@ -31,6 +31,11 @@ Complementa el resumen de la 2.3.0. Leé esto antes de tocar el código.
 2. **Pestañas**: se quitó Agua; nuevas **Ayuno** (`js/fasting.js`: protocolos 12:12 a 23:1, cronómetro, etapas, historial, racha, aviso push al completarlo vía `reminders-core.js`, tarjeta en Hoy para quien quiere bajar de peso) e **Ideas** (`js/ideas.js`: "¿Qué como ahora?" con lo que falta del día, historial, ideas nuevas con la biblioteca y de la IA con opciones nuevas; también en Hoy → "¿Qué como?").
 3. **Actividad**: pasos calculados desde la distancia con el largo del paso según altura y sexo (`EN.stepLength`, `EN.stepsOf`), meta de pasos configurable (`goals.steps`).
 4. **Tamaño del texto** (Ajustes → Personalizar): escala la ventana con el meta viewport (no `zoom`), 88 % a 125 %; 1 = tamaño original. Se arreglaron filas que no entraban en pantallas angostas.
+
+## Novedades de la 2.7.0
+1. **Metas corregidas** (`EN.calcTargets`): la IA de bienvenida y "Calcular con IA" solo ENTIENDEN los datos (sexo, edad, altura, peso, objetivo, actividad, días de gym, `caution`); las metas las calcula siempre la fórmula. Déficit 20 % (300-750 kcal), mínimos 1.200/1.500; proteína por kg de **peso de referencia** (ajustado si IMC > 25: peso a IMC 25 + 25 % del exceso), 1,5 g/kg para bajar sin fuerza, 1,8 con fuerza, 2,0 recomposición; grasas 25-35 %; carbohidratos el resto; **kcal = 4P + 4C + 9G exacto**. Explicación con la cuenta (`EN.explainTargets`). En Perfil y metas: botón "Cuadrar" y ajuste automático de carbohidratos al guardar. Caso de prueba (mujer 53 a, 90 kg, 1,60, sedentaria): 1.421 kcal, P 106, C 139, G 49 (`goals.test.mjs`).
+   **Ritmo pedido**: la IA extrae `goalWeightKg`, `weeks` y `rateKgMonth` ("llegar a 75 kg en 6 meses", "subir 2-3 kg por mes por 5 meses"); `calcTargets` usa ese ritmo limitado a `EN.maxRate` según IMC (subir hasta 1 %/sem con IMC < 19 … 0,3 % con > 25, máx. 0,8 kg; bajar hasta 1 %/sem con IMC ≥ 30 … 0,4 % con < 21, máx. 1 kg), 6.000 kcal por kg ganado y 7.700 por kg perdido, y explica el máximo de músculo por mes (`maxMuscleMonth`, ~1,25 % del peso entrenando) y cuándo se llega. Perfil y metas tiene "¿En cuántas semanas?".
+2. **Contador de uso** (`CM.pingUsage`, op `ping` en el servidor, hoja "usuarios"; `?op=estado` → `usuarios` con cantidades) e **identificación opcional** (Ajustes → Privacidad). Política de privacidad actualizada.
 
 ## Pruebas (todas pasan salvo el caso Big Mac sin IA, que es esperable)
 `foods.test`, `offline.test`, `offline_extra`, `ai_pipeline.test`, `client.test` (incluye la consulta de respaldo), `local_first.test`, `server.test`, `backup.test`, `reminders.test`, `vapid.test`, `features.mjs` (42 controles, service worker real), `persist.mjs` (Drive y comunidad simulados, 22 controles), `e2e.mjs` (60 controles; el paso de la planilla V1 se omite si falta `ref/consolidado.xlsx`).

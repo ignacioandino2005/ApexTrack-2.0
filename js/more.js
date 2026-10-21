@@ -518,6 +518,11 @@ export function openSettings(section = null) {
       ${row('recover', 'undo', 'Recuperar datos', 'Desde Drive, las copias diarias internas o un archivo')}
       ${row('borrar', 'trash', 'Borrar todos los datos', '')}
     </div>
+    <div class="set-group"><h3>Privacidad</h3>
+      ${CM.available() ? `${row('cuenta', 'chart', 'Contar mi uso (anónimo)', 'Avisa una vez por día que la app se usa, con un número al azar. Nada que te identifique.', CM.privacy().count === false ? 'No' : 'Sí')}
+      ${row('quien', 'user', 'Decirle al desarrollador quién soy', CM.privacy().ident.on ? `Compartiendo: ${esc(CM.privacy().ident.name || CM.privacy().ident.contact || 'sin nombre')}` : 'Opcional: tu nombre o contacto, para que sepa quién usa la app')}` : ''}
+      ${row('privpol', 'info', 'Política de privacidad', 'Qué datos usa la app y dónde se guardan')}
+    </div>
     <div class="set-group"><h3>Compartir</h3>
       ${row('share', 'send', 'Compartir la app', 'Cada persona usa su propio teléfono, sus datos y su clave')}
     </div>
@@ -557,6 +562,9 @@ export function openSettings(section = null) {
     else if (k === 'recover') openRecover();
     else if (k === 'share') shareApp();
     else if (k === 'avisos') openReminders();
+    else if (k === 'cuenta') { const pv = CM.privacy(); pv.count = pv.count === false; store.commit('privacidad'); if (pv.count) CM.pingUsage({ force: true }).catch(() => {}); toast(pv.count ? 'Gracias: tu uso se cuenta de forma anónima' : 'Listo: no se cuenta tu uso'); }
+    else if (k === 'quien') openIdentify();
+    else if (k === 'privpol') window.open('./privacidad.html', '_blank', 'noopener');
     else if (k === 'semanal') {
       const w = S.settings.weekly;
       const v = await pickOption({ title: 'Resumen semanal', options: [
@@ -1246,6 +1254,27 @@ Object.assign(moreActions, {
   'insight-run': () => openInsights(),
   'insight-open': (el) => openInsight(el.dataset.id),
 });
+
+// Identificarse ante el desarrollador (opcional, con consentimiento explícito)
+function openIdentify() {
+  const id = CM.privacy().ident;
+  const s = openSheet({ title: 'Decirle al desarrollador quién soy', body: `
+    <p class="muted pad-b">Es opcional. Si lo activás, una vez por día la app le manda al desarrollador lo que escribas acá, junto con cuántas comidas registraste. <b>Nunca</b> se envían tus comidas, tu peso, tus metas ni tu clave. Lo podés apagar cuando quieras y se deja de enviar.</p>
+    <label class="field"><span>Nombre o apodo</span><input class="input" id="id-name" value="${esc(id.name || '')}" autocomplete="name" placeholder="Ej.: Caro"></label>
+    <label class="field" style="margin-top:10px"><span>Contacto (opcional)</span><input class="input" id="id-contact" value="${esc(id.contact || '')}" autocomplete="email" placeholder="Correo, Instagram o teléfono"></label>
+    <label class="field" style="margin-top:10px"><span>Un mensaje para el desarrollador (opcional)</span><textarea class="input" id="id-note" rows="3" placeholder="Sugerencias, problemas, qué te gusta…">${esc(id.note || '')}</textarea></label>`,
+  footer: `${id.on ? '<button class="btn ghost" data-i="off">Dejar de compartir</button>' : ''}<button class="btn primary" data-i="on">${id.on ? 'Guardar' : 'Compartir'}</button>` });
+  s.foot.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-i]'); if (!b) return;
+    if (b.dataset.i === 'off') { Object.assign(id, { on: false, name: '', contact: '', note: '' }); store.commit('privacidad'); s.close(); CM.pingUsage({ force: true, always: true }).catch(() => {}); toast('Listo: tu nombre se borra del registro del desarrollador'); return; }
+    const name = s.body.querySelector('#id-name').value.trim(); const contact = s.body.querySelector('#id-contact').value.trim(); const note = s.body.querySelector('#id-note').value.trim();
+    if (!name && !contact) { toast('Escribí al menos un nombre o un contacto', { kind: 'error' }); return; }
+    Object.assign(id, { on: true, name, contact, note });
+    store.commit('privacidad'); s.close();
+    const okSent = await CM.pingUsage({ force: true }).catch(() => false);
+    toast(okSent ? '¡Gracias! El desarrollador ya sabe que usás la app' : 'Guardado: se envía cuando haya conexión', { ms: 4000 });
+  });
+}
 
 // ===========================================================================
 // RECUPERAR DATOS Y COPIA AUTOMÁTICA EN DRIVE
