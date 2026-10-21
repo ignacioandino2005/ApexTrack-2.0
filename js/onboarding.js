@@ -93,7 +93,7 @@ const SLIDES = [
   ['home', 'Tu día de un vistazo', 'En Hoy ves las calorías, la proteína, el agua, los hábitos y el gimnasio. Tocá cualquier comida para corregir una cantidad.'],
   ['bolt', 'Dos inteligencias', 'Lo que la app ya conoce lo resuelve al instante y sin internet. Lo nuevo (marcas, platos raros, fotos) lo analiza Gemini con tu clave gratuita.'],
   ['meal', '¿Qué como ahora?', 'En Hoy → "¿Qué como?" te propone opciones de lo que ya comiste y nuevas, ajustadas a lo que te falta del día.'],
-  ['up', 'Tu pestaña', 'Entre el micrófono y Progreso hay una pestaña a elección (Gimnasio, Estudio, Hábitos, Actividad, Ayuno o Ideas). Con la flechita de arriba cambiás a las otras.'],
+  ['up', 'Tu pestaña', 'Entre el micrófono y Progreso hay una pestaña a elección (Gimnasio, Estudio, Hábitos, Actividad, Ayuno, Ideas o Sueño). Con la flechita de arriba cambiás a las otras.'],
   ['bell', 'Recordatorios y resumen semanal', 'En Ajustes → Recordatorios elegís qué te avisa (almuerzo, agua, suplementos…). Cada lunes te llega el resumen de tu semana con qué mejorar.'],
 ];
 export function miniTour() {

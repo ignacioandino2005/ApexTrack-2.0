@@ -40,6 +40,7 @@ export function weekStats(from) {
     kcalDays: L.filter(inKcal).length, pDays: L.filter((r) => r.p >= g.p * 0.95).length, waterDays: rows.filter((r) => r.water >= (g.waterMl || 2500)).length,
     sugarDays: g.sugarMax ? L.filter((r) => r.s > g.sugarMax).length : 0, lateDays: L.filter((r) => r.late > 0).length, late: round0(avg('late', L.filter((r) => r.late > 0))),
     gym: rows.filter((r) => r.gym === 'fui').length, study: round1(rows.reduce((x, r) => x + r.study, 0)),
+    sleep: (() => { const ns = (store.S().sleep?.nights || []).filter((n) => n.date >= from && n.date <= to); return ns.length ? { avg: round1(ns.reduce((a, n) => a + n.hours, 0) / ns.length), n: ns.length, goal: store.S().sleep.goalH || 8 } : null; })(),
     weight: ws.length >= 2 ? { a: ws[0].kg, b: ws[ws.length - 1].kg, trend: round1(ws[ws.length - 1].trend - ws[0].trend) } : ws.length ? { a: ws[0].kg, b: ws[0].kg, trend: 0 } : null,
     top: store.topFoods(days.length, to, 5).map((x) => ({ name: x.name, kcal: round0(x.kcal), n: x.n })),
     best: null, worst: null, goals: { ...g }, cut,
@@ -81,6 +82,8 @@ export function weekTips(st, prev = null) {
   const wg = g.waterMl || 2500;
   if (st.water < wg * 0.8) mejorar.push(`Agua: ${fmt(st.water / 1000, 1)} L por día de ${fmt(wg / 1000, 1)} L. Llevá una botella y tomá un vaso con cada comida.`);
   else if (st.waterDays >= Math.min(5, st.days)) bien.push(`Tomaste suficiente agua ${st.waterDays} de ${st.days} días.`);
+  if (st.sleep && st.sleep.avg < st.sleep.goal - 0.5) mejorar.push(`Dormiste ${fmt(st.sleep.avg, 1)} h por noche (meta ${fmt(st.sleep.goal, 1)} h): dormir poco aumenta el hambre y los antojos. Probá acostarte 30 minutos antes.`);
+  else if (st.sleep && st.sleep.n >= 4) bien.push(`Dormiste bien: ${fmt(st.sleep.avg, 1)} h por noche.`);
   const gymGoal = Math.round((g.gymDays || 0) * st.days / 7);
   if (gymGoal && st.gym < gymGoal) mejorar.push(`Gimnasio: fuiste ${st.gym} de ${gymGoal} días. Elegí ya qué días vas a ir esta semana.`);
   else if (gymGoal) bien.push(`Cumpliste con el gimnasio: ${st.gym} ${st.gym === 1 ? 'día' : 'días'}.`);
@@ -163,6 +166,7 @@ export function weekHtml(rep) {
       ${st.bal ? row('Balance promedio', `${st.bal > 0 ? '+' : '−'}${fmt(Math.abs(st.bal))} kcal`) : ''}
       ${st.weight ? row('Peso', `${fmt(st.weight.a, 1)} → ${fmt(st.weight.b, 1)} kg`, st.weight.trend ? ` <small class="muted">(tendencia ${st.weight.trend > 0 ? '+' : ''}${fmt(st.weight.trend, 1)})</small>` : '') : ''}
       ${st.study ? row('Estudio', `${fmt(st.study, 1)} h`) : ''}
+      ${st.sleep ? row('Sueño por noche', `${fmt(st.sleep.avg, 1)} / ${fmt(st.sleep.goal, 1)} h`) : ''}
       ${st.best ? row('Mejor día', esc(cap(fmtDayShort(st.best)))) : ''}
     </section>
     ${list('Lo que va bien', 'check', 'ok', rep.tips.bien)}${list('Qué mejorar', 'bolt', '', rep.tips.mejorar)}${list('Qué cambiar', 'repeat', 'bad', rep.tips.cambiar)}

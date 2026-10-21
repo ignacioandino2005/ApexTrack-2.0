@@ -1,4 +1,4 @@
-# ApexTrack 2 — Resumen para continuar (versión 2.7.0, 21/10/2026)
+# ApexTrack 2 — Resumen para continuar (versión 2.8.0, 21/10/2026)
 
 Complementa el resumen de la 2.3.0. Leé esto antes de tocar el código.
 
@@ -37,8 +37,12 @@ Complementa el resumen de la 2.3.0. Leé esto antes de tocar el código.
    **Ritmo pedido**: la IA extrae `goalWeightKg`, `weeks` y `rateKgMonth` ("llegar a 75 kg en 6 meses", "subir 2-3 kg por mes por 5 meses"); `calcTargets` usa ese ritmo limitado a `EN.maxRate` según IMC (subir hasta 1 %/sem con IMC < 19 … 0,3 % con > 25, máx. 0,8 kg; bajar hasta 1 %/sem con IMC ≥ 30 … 0,4 % con < 21, máx. 1 kg), 6.000 kcal por kg ganado y 7.700 por kg perdido, y explica el máximo de músculo por mes (`maxMuscleMonth`, ~1,25 % del peso entrenando) y cuándo se llega. Perfil y metas tiene "¿En cuántas semanas?".
 2. **Contador de uso** (`CM.pingUsage`, op `ping` en el servidor, hoja "usuarios"; `?op=estado` → `usuarios` con cantidades) e **identificación opcional** (Ajustes → Privacidad). Política de privacidad actualizada.
 
+## Novedades de la 2.8.0
+1. **Metas personalizadas**: la IA (bienvenida y Perfil y metas) extrae además `diet` (vegetariana, vegana, carnivora, keto, low_carb, mediterranea, alta_proteina, sin_gluten, omnivora), `conditions` (diabetes, prediabetes, hipertension, colesterol, hipotiroidismo, higado_graso, renal, gota, celiaquia, embarazo, lactancia, tca), `proteinPerKg`/`proteinG`, `carbsMax` y `preferences` (gustos, alergias). `calcTargets` los respeta: proteína pedida (sobre el peso real si IMC ≤ 27, o ≤ 30 entrenando; tope 2,5 g/kg y 45 %), tope de carbohidratos con grasas que completan (máx. 75 %) y algo más de proteína, diabetes ≤ 40 % de carbohidratos y azúcar ≤ 5 %, renal 0,8 g/kg, embarazo/lactancia sin déficit, tca con déficit suave, vegana +10 % de proteína… y explica cada ajuste (`notes`). Dieta, salud y gustos se guardan en `settings.ai.notes` para el análisis de comidas y las ideas. Perfil y metas tiene "Dieta y salud".
+2. **Pestaña Sueño** (`js/sleep.js`): "Me voy a dormir" / "Me desperté" o registrar a mano (horas con botones, calidad 1-5, tiempo despierto, qué pasó ese día), meta y hora de levantarse → hora ideal para acostarse, promedio, deuda, regularidad, calidad, gráfico semanal y "lo que influye en tu sueño" (factores marcados, gimnasio, comer después de cenar, acostarse tarde). En Hoy, fila Sueño; recordatorio "Hora de dormir"; resumen semanal con sueño; la IA y la IA propia entienden "dormí 6 horas y media, mal".
+
 ## Pruebas (todas pasan salvo el caso Big Mac sin IA, que es esperable)
-`foods.test`, `offline.test`, `offline_extra`, `ai_pipeline.test`, `client.test` (incluye la consulta de respaldo), `local_first.test`, `server.test`, `backup.test`, `reminders.test`, `vapid.test`, `features.mjs` (42 controles, service worker real), `persist.mjs` (Drive y comunidad simulados, 22 controles), `e2e.mjs` (60 controles; el paso de la planilla V1 se omite si falta `ref/consolidado.xlsx`).
+`foods.test`, `offline.test`, `offline_extra`, `ai_pipeline.test`, `client.test` (incluye la consulta de respaldo), `local_first.test`, `server.test`, `backup.test`, `reminders.test`, `vapid.test`, `features.mjs` (50 controles, service worker real), `persist.mjs` (Drive y comunidad simulados, 22 controles), `e2e.mjs` (60 controles; el paso de la planilla V1 se omite si falta `ref/consolidado.xlsx`).
 
 ## Ideas pendientes
 - En el servidor: pegar el nuevo `comunidad.gs`, correr `instalarAvisos()` y publicar versión nueva.

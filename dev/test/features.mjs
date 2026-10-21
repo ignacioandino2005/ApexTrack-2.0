@@ -39,7 +39,7 @@ await ctx.route('https://comunidad.test/**', (r) => {
   const q = r.request();
   if (q.method() === 'POST') {
     const b = JSON.parse(q.postData()); comm.posts.push(b);
-    if (b.op === 'plan') return r.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: comm.plans++ ? { ok: false, error: 'usado' } : { ok: true, plan: { sex: 'm', age: 28, heightCm: 178, weightKg: 84, goal: 'bajar', level: 'moderado', gymDays: 4, kcal: 2200, protein: 170, carbs: 210, fat: 70, sugarMax: 55, waterMl: 2950, explanation: 'Hombre de 28 años, 1,78 m y 84 kg, entrena 4 veces por semana y quiere bajar grasa', missing: [], caution: '' } } });
+    if (b.op === 'plan') return r.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: comm.plans++ ? { ok: false, error: 'usado' } : { ok: true, plan: { sex: 'm', age: 28, heightCm: 178, weightKg: 84, goal: 'bajar', level: 'moderado', gymDays: 4, kcal: 2200, protein: 170, carbs: 210, fat: 70, sugarMax: 55, waterMl: 2950, explanation: 'Hombre de 28 años, 1,78 m y 84 kg, entrena 4 veces por semana y quiere bajar grasa', missing: [], caution: '', diet: 'sin_especificar', conditions: ['hipertension'], proteinPerKg: 2.1, carbsMax: null, preferences: 'No come pescado.' } } });
     return r.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: { ok: true, horarios: (b.times || []).length } });
   }
   const u = new URL(q.url());
@@ -69,8 +69,11 @@ await sheetTop().locator('#ob-text').fill('Tengo 28 años, soy hombre, mido 1,78
 await sheetTop().locator('[data-o="calc"]').click(); await page.waitForTimeout(1200);
 await shot('f00-bienvenida-metas');
 const prof = await val(() => ({ g: window.__apex.store.S().settings.goals, p: window.__apex.store.S().settings.profile, used: !!window.__apex.store.S().settings.onboardAI, key: window.__apex.store.S().settings.ai.key }));
-ok('Bienvenida: la IA entiende los datos y la app calcula metas coherentes', prof.g.kcal === prof.g.p * 4 + prof.g.c * 4 + prof.g.f * 9 && prof.g.p === 145 && prof.p.heightCm === 178 && prof.p.goal === 'bajar' && prof.used && !prof.key, `${prof.g.kcal} kcal · P ${prof.g.p} · C ${prof.g.c} · G ${prof.g.f}`);
-ok('Muestra la cuenta de los macros', /= 2\.251 kcal/.test(await sheetTop().innerText()));
+ok('Bienvenida: la IA entiende los datos y la app calcula metas coherentes', prof.g.kcal === prof.g.p * 4 + prof.g.c * 4 + prof.g.f * 9 && prof.g.p === 176 && prof.p.heightCm === 178 && prof.p.goal === 'bajar' && prof.used && !prof.key, `${prof.g.kcal} kcal · P ${prof.g.p} · C ${prof.g.c} · G ${prof.g.f}`);
+const obTxt = await sheetTop().innerText();
+ok('Muestra la cuenta de los macros', /\+ .* = 2\.\d{3} kcal/.test(obTxt));
+ok('Respeta la proteína pedida y tiene en cuenta la salud', /2,1 g por kg de tu peso, como pediste/.test(obTxt) && /presión/.test(obTxt), obTxt.replace(/\s+/g, ' ').slice(0, 200));
+ok('Guarda dieta, salud y gustos para la IA', await val(() => { const S = window.__apex.store.S(); return S.settings.profile.conditions.includes('hipertension') && /No come pescado/.test(S.settings.ai.notes) && /Salud: Presión alta/.test(S.settings.ai.notes); }));
 ok('La app nunca recibe la clave de bienvenida', !JSON.stringify(comm.posts).includes('AQ.') && comm.posts.some((x) => x.op === 'plan' && /^ins_/.test(x.install)));
 await sheetTop().locator('[data-o="ok"]').click(); await page.waitForTimeout(500);
 const tabOpts = await sheetTop().innerText();
@@ -177,7 +180,7 @@ ok('No lo repite', notes2 === notes.length);
 await page.locator('#slot-more').click(); await page.waitForTimeout(300);
 await shot('f06-flechita');
 const opts = await page.locator('#slot-menu [data-slot-go]').count();
-ok('La flechita despliega las 6 pestañas (sin Agua)', opts === 6 && await page.locator('#slot-menu [data-slot-go="agua"]').count() === 0, String(opts));
+ok('La flechita despliega las 7 pestañas (sin Agua)', opts === 7 && await page.locator('#slot-menu [data-slot-go="agua"]').count() === 0, String(opts));
 await page.locator('#slot-menu [data-slot-go="ayuno"]').click(); await page.waitForTimeout(400);
 ok('Abre Ayuno sin cambiar la principal', (await val(() => window.__apex.ui.tab)) === 'ayuno' && (await val(() => window.__apex.store.S().settings.ui.slotTab || 'gym')) === 'gym');
 await page.locator('#view [data-act="fast-start-ago"]').click(); await page.waitForTimeout(300);
@@ -224,6 +227,30 @@ const before = await val(() => window.__apex.store.dayTotals(new Date().toLocale
 await sheetTop().locator('[data-src="ai"]').first().click(); await page.waitForTimeout(400);
 ok('Agregar una idea al día', (await val(() => window.__apex.store.dayTotals(new Date().toLocaleDateString('sv-SE')).items)) > before);
 await closeSheet();
+
+// --- Sueño
+await page.locator('#slot-more').click(); await page.waitForTimeout(200);
+ok('La flechita incluye Sueño', await page.locator('#slot-menu [data-slot-go="sueno"]').count() === 1);
+await page.locator('#slot-menu [data-slot-go="sueno"]').click(); await page.waitForTimeout(400);
+await page.locator('#view [data-act="sleep-log"]').click(); await page.waitForTimeout(400);
+await sheetTop().locator('[data-z="bed-"]').click(); await sheetTop().locator('[data-z="bed-"]').click();
+await sheetTop().locator('[data-z="q"][data-v="4"]').click(); await sheetTop().locator('[data-z="f"][data-v="pantalla"]').click();
+await shot('f12-sueno-registrar');
+await sheetTop().locator('[data-z="save"]').click(); await page.waitForTimeout(400);
+const night = await val(() => window.__apex.store.S().sleep.nights.slice(-1)[0]);
+ok('Registrar una noche (hora, calidad y qué pasó)', night && Math.abs(night.hours - 8) < 0.01 && night.quality === 4 && night.factors.includes('pantalla'), JSON.stringify(night && { h: night.hours, q: night.quality, f: night.factors }));
+// historial para ver qué influye
+await val(() => { const sl = window.__apex.store.S().sleep; const D = (n) => { const x = new Date(); x.setDate(x.getDate() - n); return x.toLocaleDateString('sv-SE'); };
+  for (let i = 1; i <= 8; i++) { const wake = new Date(D(i) + 'T07:00').getTime(); const pant = i % 2 === 0; const h = pant ? 6 : 7.8; sl.nights.push({ id: 'x' + i, date: D(i), bed: wake - h * 3600000, wake, hours: h, quality: pant ? 2 : 4, awake: 0, factors: pant ? ['pantalla'] : [] }); }
+  sl.nights.sort((a, b) => a.date.localeCompare(b.date)); window.__apex.store.commit('x'); });
+await page.waitForTimeout(400);
+const slTxt = await page.locator('#view').innerText();
+await shot('f13-sueno');
+ok('Sueño: promedio, deuda, regularidad y hora ideal', /Promedio \(7 días\)/.test(slTxt) && /Deuda de sueño/.test(slTxt) && /Regularidad/.test(slTxt) && /Hora ideal para acostarte\s*22:45/.test(slTxt));
+ok('Detecta qué empeora el sueño (pantallas)', /pantallas antes de dormir.*menos/i.test(slTxt), (slTxt.match(/Cuando marcaste[^\n]*/) || [''])[0]);
+await page.locator('#view [data-act="sleep-start"]').click(); await page.waitForTimeout(300);
+ok('"Me voy a dormir" empieza a contar', await val(() => !!window.__apex.store.S().sleep.active) && /Durmiendo desde/.test(await page.locator('#view').innerText()));
+await page.locator('#view [data-act="sleep-cancel"]').click(); await page.waitForTimeout(300);
 
 // --- Captura del reloj compartida desde otra app (Web Share Target)
 const png = fs.readFileSync(path.join(ROOT, 'icons/icon-192.png')).toString('base64');

@@ -2,12 +2,12 @@
 // (aunque la app esté cerrada) y recibe capturas compartidas desde otras apps (reloj, Samsung Health).
 import { dueNow, evaluate } from './js/reminders-core.js';
 
-const VERSION = 'apextrack-2.7.1';
+const VERSION = 'apextrack-2.8.0';
 const CORE = [
   './', './index.html', './manifest.webmanifest', './css/app.css', './fonts/archivo.woff2',
   './js/app.js', './js/more.js', './js/store.js', './js/foods.js', './js/ai.js', './js/ui.js', './js/util.js',
   './js/icons.js', './js/charts.js', './js/study.js', './js/energy.js', './js/profile.js', './js/insights.js', './js/backup.js', './js/voice.js', './js/camera.js', './js/excel.js', './js/config.js', './js/community.js',
-  './js/reminders-core.js', './js/notify.js', './js/weekly.js', './js/tabs.js', './js/fasting.js', './js/ideas.js', './js/onboarding.js',
+  './js/reminders-core.js', './js/notify.js', './js/weekly.js', './js/tabs.js', './js/fasting.js', './js/ideas.js', './js/onboarding.js', './js/sleep.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png', './icons/apple-touch-icon.png',
 ];
 const LAZY = ['./vendor/exceljs.min.js'];

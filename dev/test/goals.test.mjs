@@ -30,5 +30,23 @@ const g4 = calcTargets({ sex: 'm', age: 30, cm: 175, kg: 80, level: 'moderado', 
 ok('"Llegar a 85 kg" sin decir el objetivo → entiende que es subir', g4.goal === 'subir' && g4.kcal > g4.tdee, `${g4.goal} ${g4.kcal}`);
 const g5 = calcTargets({ sex: 'm', age: 35, cm: 175, kg: 95, level: 'ligero', goal: 'bajar', gymDays: 2, rateKgMonth: 2 });
 ok('Bajar 2 kg por mes con obesidad leve → ritmo pedido', Math.abs(g5.rate * 4.345 - 2) < 0.3 && !g5.limited, `${g5.rate} kg/sem · ${g5.kcal} kcal`);
+
+// personalización: proteína pedida, tope de carbohidratos, dietas y salud
+const sum = (t) => t.p * 4 + t.c * 4 + t.f * 9 === t.kcal;
+const n1 = calcTargets({ sex: 'm', age: 21, cm: 180, kg: 92, level: 'moderado', goal: 'bajar', gymDays: 5, proteinPerKg: 2.2 });
+ok('Nacho quiere 2,2 g/kg → 202 g (sobre su peso, entrena)', n1.p === 202 && sum(n1) && /como pediste/.test(n1.explain), `${n1.p} g`);
+const n2 = calcTargets({ sex: 'm', age: 30, cm: 178, kg: 80, level: 'moderado', goal: 'bajar', gymDays: 3, carbsMax: 50 });
+ok('Máximo 50 g de carbohidratos → se respeta y se compensa con grasas', n2.c === 50 && sum(n2) && n2.f * 9 > n2.kcal * 0.5 && /grasas/.test(n2.explain), `C ${n2.c} G ${n2.f} P ${n2.p}`);
+const n3 = calcTargets({ sex: 'f', age: 45, cm: 162, kg: 75, level: 'ligero', goal: 'bajar', gymDays: 0, conditions: ['diabetes'] });
+ok('Diabetes → carbohidratos ≤ 40 %, azúcar ≤ 5 % y aviso', n3.c * 4 <= n3.kcal * 0.41 && n3.sugarMax * 4 <= n3.kcal * 0.051 && /médico/.test(n3.explain) && sum(n3));
+const n4 = calcTargets({ sex: 'm', age: 40, cm: 175, kg: 85, level: 'ligero', goal: 'bajar', gymDays: 0, conditions: ['renal'], proteinPerKg: 2.2 });
+ok('Problema renal → proteína 0,8 g/kg aunque pida más', n4.p <= Math.round(n4.ref * 0.8) + 1 && /nefrólogo/.test(n4.explain) && sum(n4), `${n4.p} g`);
+const n5 = calcTargets({ sex: 'f', age: 32, cm: 165, kg: 68, level: 'ligero', goal: 'bajar', gymDays: 0, conditions: ['embarazo'] });
+ok('Embarazo → nunca déficit', n5.kcal > n5.tdee && /embarazo/.test(n5.explain) && sum(n5));
+const n6 = calcTargets({ sex: 'f', age: 30, cm: 165, kg: 60, level: 'moderado', goal: 'mantener', gymDays: 3, diet: 'vegana' });
+const n6b = calcTargets({ sex: 'f', age: 30, cm: 165, kg: 60, level: 'moderado', goal: 'mantener', gymDays: 3 });
+ok('Vegana → algo más de proteína y consejo de B12', n6.p > n6b.p && /B12/.test(n6.explain) && sum(n6));
+const n7 = calcTargets({ sex: 'm', age: 25, cm: 178, kg: 75, level: 'moderado', goal: 'mantener', gymDays: 4, diet: 'keto' });
+ok('Keto → ≤ 40 g de carbohidratos', n7.c <= 40 && sum(n7), `C ${n7.c}`);
 console.log(res.join('\n'));
 console.log(calcTargets(CASES[0][1]).explain);

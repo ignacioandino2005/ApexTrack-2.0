@@ -587,6 +587,7 @@ export function openSettings(section = null) {
         { value: 'actividad', label: 'Actividad', sub: 'Pasos, reloj inteligente, calorías gastadas y balance', icon: 'walk' },
         { value: 'ayuno', label: 'Ayuno intermitente', sub: 'Cronómetro 16:8, 18:6…, aviso al terminar e historial', icon: 'timer' },
         { value: 'ideas', label: '¿Qué como?', sub: 'Ideas de tu historial, nuevas y de la IA según lo que te falta', icon: 'meal' },
+        { value: 'sueno', label: 'Sueño', sub: 'Horas, calidad, regularidad y qué te hace dormir mejor', icon: 'moon' },
       ] });
       if (v) { const old = S.settings.ui.slotTab || 'gym'; S.settings.ui.slotTab = v; if (ui.tab === old) ui.tab = v; store.commit('slot'); }
     }
@@ -1169,6 +1170,7 @@ export async function maybeOnboard() {
     { value: 'ayuno', label: 'Ayuno intermitente', sub: cut ? 'Recomendado para tu objetivo de bajar de peso' : 'Cronómetro 16:8 y aviso al terminar', icon: 'timer' },
     { value: 'ideas', label: '¿Qué como?', sub: 'Ideas según lo que te falta del día', icon: 'meal' },
     { value: 'actividad', label: 'Actividad', sub: 'Pasos, reloj y calorías gastadas', icon: 'walk' },
+    { value: 'sueno', label: 'Sueño', sub: 'Horas, calidad y qué te hace dormir mejor', icon: 'moon' },
     { value: 'habitos', label: 'Hábitos', sub: 'Rachas de hábitos y suplementos', icon: 'check' },
     { value: 'estudio', label: 'Estudio', sub: 'Cronómetro, pomodoro y materias', icon: 'book' },
   ] });

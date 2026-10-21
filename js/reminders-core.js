@@ -10,6 +10,7 @@ export const TYPES = {
   peso: { label: 'Pesarse', icon: 'scale' },
   gym: { label: 'Gimnasio', icon: 'dumbbell' },
   dia: { label: 'Resumen del día', icon: 'chart' },
+  sueno: { label: 'Hora de dormir', icon: 'moon' },
   resumen: { label: 'Resumen semanal', icon: 'sparkle' },
   libre: { label: 'Otro', icon: 'bell' },
 };
@@ -25,6 +26,7 @@ export function defaultReminders() {
     { id: 'r_estudio', type: 'estudio', time: '19:00', days: [1, 2, 3, 4, 5], on: false, onlyIfMissing: true },
     { id: 'r_gym', type: 'gym', time: '18:00', days: [1, 2, 3, 4, 5], on: false, onlyIfMissing: true },
     { id: 'r_peso', type: 'peso', time: '08:30', days: [1], on: false, onlyIfMissing: true },
+    { id: 'r_sueno', type: 'sueno', time: '22:45', days: ALL, on: false, onlyIfMissing: true },
     { id: 'r_dia', type: 'dia', time: '23:00', days: ALL, on: false, onlyIfMissing: false },
     { id: 'r_resumen', type: 'resumen', time: '09:30', days: [1], on: true, onlyIfMissing: false },
   ];
@@ -101,6 +103,11 @@ export function evaluate(r, state, now = new Date()) {
     }
     case 'dia': {
       return { ...base, title: `Hoy: ${fmtN(d.kcal)} de ${fmtN(g.kcal)} kcal`, body: `Proteína ${fmtN(d.p)} de ${fmtN(g.p)} g · agua ${fmtN(d.water / 1000, 1)} de ${fmtN((g.waterMl || 2500) / 1000, 1)} L`, url: './', silent: true, actions: [{ action: 'agua', title: `+1 vaso` }, { action: 'registrar', title: 'Registrar' }] };
+    }
+    case 'sueno': {
+      if (r.onlyIfMissing && state.sleep?.active) return null;
+      const goal = state.sleep?.goalH || 8; const wake = state.sleep?.wake || '07:00';
+      return { ...base, title: r.text || 'Hora de ir a dormir', body: `Para dormir ${String(goal).replace('.', ',')} h y levantarte a las ${wake}, conviene acostarte ahora. Dejá el teléfono 30 min antes.`, url: './?accion=sueno', silent: true };
     }
     case 'resumen':
       return { ...base, title: r.text || 'Tu resumen de la semana está listo', body: 'Mirá cómo te fue, qué mejorar y qué cambiar esta semana.', url: './?accion=resumen' };

@@ -4,7 +4,7 @@ import { todayISO, uid, addDays, dateRange, weekStart, round1, round0, deepClone
 import { setCustomFoods, calc, getFood, foodUnits, unitLabel, canonUnit, sanitizePer100 } from './foods.js';
 import { defaultReminders } from './reminders-core.js';
 
-export const APP_VERSION = '2.7.1';
+export const APP_VERSION = '2.8.0';
 const SCHEMA = 1;
 const DB_NAME = 'apextrack';
 const DB_STORE = 'kv';
@@ -268,11 +268,13 @@ export function migrate(d) {
   if (!out.days || typeof out.days !== 'object') out.days = {};
   if (!out.usage) out.usage = {};
   if (!out.settings.reminders || !Array.isArray(out.settings.reminders.list)) out.settings.reminders = { on: false, push: false, list: defaultReminders() };
+  if (!out.settings.reminders.list.some((r) => r.id === 'r_sueno')) out.settings.reminders.list.push({ id: 'r_sueno', type: 'sueno', time: '22:45', days: [0, 1, 2, 3, 4, 5, 6], on: false, onlyIfMissing: true });
   if (!out.settings.weekly || typeof out.settings.weekly !== 'object') out.settings.weekly = { day: 1, ai: true };
   if (!out.settings.goals.steps) out.settings.goals.steps = 8000;
   if (!Array.isArray(out.weekly)) out.weekly = [];
   if (!out.settings.privacy || typeof out.settings.privacy !== 'object') out.settings.privacy = { count: true, ident: { on: false, name: '', contact: '', note: '' } };
   if (out.settings.ui.slotTab === 'agua') out.settings.ui.slotTab = 'gym'; // la pestaña Agua se quitó en la 2.6
+  if (!out.sleep || typeof out.sleep !== 'object') out.sleep = { goalH: 8, wake: '07:00', nights: [], active: null };
   if (!out.fasting || typeof out.fasting !== 'object') out.fasting = { protocol: '16:8', active: null, history: [], dismissed: false };
   out.schema = SCHEMA;
   out.version = APP_VERSION;

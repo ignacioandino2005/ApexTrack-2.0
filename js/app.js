@@ -20,6 +20,7 @@ import * as EN from './energy.js';
 import { renderActividad, tabActions } from './tabs.js';
 import { renderAyuno, fastingActions, fastingCard, fastingTick } from './fasting.js';
 import { renderIdeas, openIdeas, startIdeas } from './ideas.js';
+import { renderSueno, sleepActions, sleepCard, sleepTick, saveNightFromText } from './sleep.js';
 import { maybeAutoWeekly, weeklyCard, pendingWeekly, openWeekly, askWeekly } from './weekly.js';
 import { startReminders } from './notify.js';
 import { scheduleCloud, cloudPush } from './backup.js';
@@ -39,8 +40,8 @@ export const ui = {
   online: navigator.onLine !== false,
   jobs: [], // análisis que siguen en segundo plano
 };
-const TABS = ['hoy', 'diario', 'gym', 'estudio', 'habitos', 'actividad', 'ayuno', 'ideas', 'progreso'];
-export const SLOT_TABS = { gym: ['Gym', 'dumbbell'], estudio: ['Estudio', 'book'], habitos: ['Hábitos', 'check'], actividad: ['Actividad', 'walk'], ayuno: ['Ayuno', 'timer'], ideas: ['Ideas', 'meal'] };
+const TABS = ['hoy', 'diario', 'gym', 'estudio', 'habitos', 'actividad', 'ayuno', 'ideas', 'sueno', 'progreso'];
+export const SLOT_TABS = { gym: ['Gym', 'dumbbell'], estudio: ['Estudio', 'book'], habitos: ['Hábitos', 'check'], actividad: ['Actividad', 'walk'], ayuno: ['Ayuno', 'timer'], ideas: ['Ideas', 'meal'], sueno: ['Sueño', 'moon'] };
 function slotTab() { const t = store.S().settings.ui.slotTab; return SLOT_TABS[t] ? t : 'gym'; }
 function paintSlot() {
   const b = document.querySelector('.tab[data-slot]');
@@ -99,6 +100,7 @@ export function render() {
   else if (ui.tab === 'actividad') html = renderActividad();
   else if (ui.tab === 'ayuno') html = renderAyuno();
   else if (ui.tab === 'ideas') html = renderIdeas();
+  else if (ui.tab === 'sueno') html = renderSueno();
   paintSlot();
   v.innerHTML = html;
   v.dataset.tab = ui.tab;
@@ -227,6 +229,7 @@ function viewHoy() {
         <div class="kv"><span>${icon('dumbbell', 18)}Gimnasio</span>
           <div class="seg-ctl" style="min-width:min(230px,100%);flex:1 1 230px;max-width:100%">${gymStates.map(([k, l]) => `<button class="${rec.gym === k ? 'on' : ''}" data-act="gym-day" data-v="${k}">${l}</button>`).join('')}</div></div>
         <div class="kv"><span>${icon('walk', 18)}Actividad</span><button class="weight-btn" data-act="activity-add">${en.items.length ? `${fmt(en.items.reduce((x, a) => x + a.kcal, 0))} kcal` : 'Agregar'}</button></div>
+        ${d === today ? sleepCard() : ''}
         <div class="kv"><span>${icon('scale', 18)}Peso en ayunas</span><button class="weight-btn" data-act="weight">${w && w.weight ? `${fmt(w.weight, 1)} kg` : 'Registrar'}</button></div>
         ${hours ? `<div class="kv"><span>${icon('book', 18)}${esc(hours.name)}</span><div class="study"><button class="step-btn" data-act="study" data-d="-0.5" aria-label="Menos">${icon('minus', 18)}</button><b>${fmt(rec.study || 0, 1)} h</b><button class="step-btn" data-act="study" data-d="0.5" aria-label="Más">${icon('plus', 18)}</button></div></div>` : ''}
       </div>
@@ -363,7 +366,7 @@ async function pickMoment(current, title = 'Comida') {
 export { pickMoment };
 
 export function registerActions(more) { Object.assign(actions, more); }
-Object.assign(actions, moreActions, tabActions, fastingActions);
+Object.assign(actions, moreActions, tabActions, fastingActions, sleepActions);
 
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
@@ -665,7 +668,7 @@ function dropJob(st) {
 function finishBackground(st, draft) {
   dropJob(st);
   const n = draft.groups.reduce((a, g) => a + g.items.length, 0);
-  if (!n && !draft.water.length && !draft.habits.length && !draft.gym.length && !draft.weight.length && !(draft.study || []).length && !(draft.activity || []).length) {
+  if (!n && !draft.water.length && !draft.habits.length && !draft.gym.length && !draft.weight.length && !(draft.study || []).length && !(draft.activity || []).length && !(draft.sleep || []).length) {
     store.S().pending.push({ id: uid('p'), text: st.text.trim(), date: st.date, moment: st.moment, at: Date.now() });
     store.commit('pending');
     toast('La IA no encontró comidas en el mensaje: quedó guardado para revisarlo', { action: 'Abrir', onAction: runPending, ms: 7000, kind: 'error' });
@@ -720,12 +723,13 @@ function showReview(st, draft) {
       ${g.items.map((it, ii) => reviewItem(it, gi, ii)).join('')}
     </div>`;
   });
-  if (!draft.groups.length) groupsHtml = `<div class="empty" style="margin-top:6px"><strong>Sin alimentos</strong>${draft.water.length || draft.habits.length || draft.gym.length || draft.weight.length || draft.study?.length || draft.activity?.length ? 'Solo se registran los datos de abajo.' : 'No encontré comidas en el mensaje.'}</div>`;
+  if (!draft.groups.length) groupsHtml = `<div class="empty" style="margin-top:6px"><strong>Sin alimentos</strong>${draft.water.length || draft.habits.length || draft.gym.length || draft.weight.length || draft.study?.length || draft.activity?.length || draft.sleep?.length ? 'Solo se registran los datos de abajo.' : 'No encontré comidas en el mensaje.'}</div>`;
   const extras = [];
   draft.water.forEach((w, i) => extras.push(`<span class="rv-extra">${icon('drop', 16)}${w.mode === 'fijar' ? 'Agua total' : '+'}${fmt(w.ml)} ml · ${esc(relativeDayLabel(w.date, today).toLowerCase())}<button data-r="rm" data-k="water" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   draft.habits.forEach((h, i) => extras.push(`<span class="rv-extra">${icon(h.done ? 'check' : 'x', 16)}${esc(h.name)}${h.id ? '' : ' (nuevo)'} · ${esc(relativeDayLabel(h.date, today).toLowerCase())}<button data-r="rm" data-k="habits" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   draft.gym.forEach((g, i) => extras.push(`<span class="rv-extra">${icon('dumbbell', 16)}Gym: ${g.status === 'fui' ? 'fui' : g.status === 'no_fui' ? 'no fui' : 'descanso'}${g.detail ? ` (${esc(g.detail)})` : ''} · ${esc(relativeDayLabel(g.date, today).toLowerCase())}<button data-r="rm" data-k="gym" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   (draft.activity || []).forEach((a, i) => extras.push(`<span class="rv-extra">${icon('walk', 16)}${esc(EN.describeAct(a))} · ${esc(relativeDayLabel(a.date, today).toLowerCase())}<button data-r="rm" data-k="activity" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
+  (draft.sleep || []).forEach((x, i) => extras.push(`<span class="rv-extra">${icon('moon', 16)}Dormí ${fmt(x.hours, 1)} h${x.quality ? ` · calidad ${x.quality}/5` : ''} · ${esc(relativeDayLabel(x.date, today).toLowerCase())}<button data-r="rm" data-k="sleep" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   (draft.study || []).forEach((x, i) => extras.push(`<span class="rv-extra">${icon('book', 16)}Estudio ${fmt(x.hours, 1)} h · ${esc(relativeDayLabel(x.date, today).toLowerCase())}<button data-r="rm" data-k="study" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   draft.weight.forEach((w, i) => extras.push(`<span class="rv-extra">${icon('scale', 16)}${fmt(w.kg, 1)} kg · ${esc(relativeDayLabel(w.date, today).toLowerCase())}<button data-r="rm" data-k="weight" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   draft.skipped.forEach((k) => extras.push(`<span class="rv-extra muted">${esc(store.momentName(k.moment))}: sin registrar · ${esc(relativeDayLabel(k.date, today).toLowerCase())}</span>`));
@@ -879,6 +883,7 @@ function saveDraft(st, draft, { background = false } = {}) {
   for (const w of draft.weight) store.upsertBody(w.date, { weight: w.kg });
   for (const x of draft.study || []) store.setStudy(x.date, (store.day(x.date).study || 0) + x.hours);
   for (const a of draft.activity || []) EN.addActivity(a.date, a);
+  for (const x of draft.sleep || []) saveNightFromText(x);
   for (const g of draft.groups) for (const it of g.items) if (it._saveLib) saveItemAsFood(it);
   store.commit('save');
   const tot = AI.draftTotals(draft);
@@ -1212,7 +1217,7 @@ async function boot() {
   window.addEventListener('offline', () => { ui.online = false; render(); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') store.flush(); else { checkDayRollover(); store.dailySnapshot(); } });
   window.addEventListener('pagehide', () => store.flush());
-  setInterval(() => { checkDayRollover(); gymTimerTick(); if (ui.tab === 'ayuno') fastingTick(); }, 1000);
+  setInterval(() => { checkDayRollover(); gymTimerTick(); if (ui.tab === 'ayuno') fastingTick(); if (ui.tab === 'sueno') sleepTick(); }, 1000);
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
   // accesos directos del ícono, notificaciones y capturas compartidas
   const p = new URLSearchParams(location.search);
@@ -1259,6 +1264,7 @@ async function handleAction(p) {
   } else if (a === 'peso') { ui.tab = 'hoy'; setDate(today); actions.weight(); }
   else if (a === 'gym' || a === 'estudio') { ui.tab = a === 'gym' ? 'hoy' : 'estudio'; setDate(today); }
   else if (a === 'ayuno') go('ayuno');
+  else if (a === 'sueno') go('sueno');
   else if (a === 'ideas') openIdeas();
   else if (a === 'resumen') { const r = pendingWeekly(); if (r) openWeekly(r); else askWeekly('pasada'); }
   else if (a === 'compartir') {

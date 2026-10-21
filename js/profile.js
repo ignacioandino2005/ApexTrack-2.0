@@ -9,7 +9,7 @@ import { canDictate, startDictation } from './voice.js';
 
 const applyTargetsTo = (st, t) => { Object.assign(st, { kcal: t.kcal, p: t.p, c: t.c, f: t.f, sugarMax: t.sugarMax, waterMl: t.waterMl }); };
 const dataOkOf = (st) => Number(st.weightKg) > 25 && Number(st.heightCm) > 100;
-const refTargets = (st) => EN.calcTargets({ sex: st.sex, age: st.birthYear ? new Date().getFullYear() - Number(st.birthYear) : 30, cm: Number(st.heightCm), kg: Number(st.weightKg), level: st.level || 'moderado', goal: st.goal || 'mantener', gymDays: Number(st.gymDays) || 0, goalKg: Number(st.goalWeight) || null, weeks: Number(st.goalWeeks) || null, rateKgMonth: Number(st.rateKgMonth) || null });
+const refTargets = (st) => EN.calcTargets({ sex: st.sex, age: st.birthYear ? new Date().getFullYear() - Number(st.birthYear) : 30, cm: Number(st.heightCm), kg: Number(st.weightKg), level: st.level || 'moderado', goal: st.goal || 'mantener', gymDays: Number(st.gymDays) || 0, goalKg: Number(st.goalWeight) || null, weeks: Number(st.goalWeeks) || null, rateKgMonth: Number(st.rateKgMonth) || null, diet: st.diet || '', conditions: st.conditions || [], proteinPerKg: Number(st.proteinPerKg) || null, proteinG: Number(st.proteinG) || null, carbsMax: Number(st.carbsMax) || null });
 
 /** Estado editable del perfil a partir de lo guardado. */
 export function profileState() {
@@ -18,7 +18,8 @@ export function profileState() {
   const g = { ...S.settings.goals };
   return {
     name: p.name || '', sex: p.sex || 'm', birthYear: p.birthYear || '', heightCm: p.heightCm || '', weightKg: store.latestWeight()?.kg || p.weightKg || '',
-    goalWeight: p.goalWeight || '', goalWeeks: p.goalWeeks || '', rateKgMonth: p.rateKgMonth || '', level: p.level || '', goal: p.goal || '', gymDays: g.gymDays ?? 3, rawGrains: p.rawGrains !== false,
+    goalWeight: p.goalWeight || '', goalWeeks: p.goalWeeks || '', rateKgMonth: p.rateKgMonth || '', level: p.level || '',
+    diet: p.diet || '', conditions: Array.isArray(p.conditions) ? [...p.conditions] : [], proteinPerKg: p.proteinPerKg || '', proteinG: p.proteinG || '', carbsMax: p.carbsMax || '', preferences: '', goal: p.goal || '', gymDays: g.gymDays ?? 3, rawGrains: p.rawGrains !== false,
     kcal: g.kcal, p: g.p, c: g.c, f: g.f, sugarMax: g.sugarMax || '', waterMl: g.waterMl || 2500,
     aiText: '', explanation: '', dict: null,
   };
@@ -37,6 +38,12 @@ export function mergePlan(st, r) {
   st.goalWeeks = r.weeks > 0 && r.weeks < 520 ? Math.round(r.weeks) : '';
   st.rateKgMonth = r.rateKgMonth > 0 && r.rateKgMonth < 20 ? round1(r.rateKgMonth) : '';
   if (EN.LEVELS[r.level]) st.level = r.level;
+  if (EN.DIETS[r.diet]) st.diet = r.diet;
+  if (Array.isArray(r.conditions)) st.conditions = r.conditions.filter((c) => EN.CONDITIONS[c]);
+  st.proteinPerKg = r.proteinPerKg > 0.6 && r.proteinPerKg < 3.5 ? Math.round(r.proteinPerKg * 10) / 10 : '';
+  st.proteinG = r.proteinG > 30 && r.proteinG < 400 ? Math.round(r.proteinG) : '';
+  st.carbsMax = r.carbsMax > 0 && r.carbsMax < 800 ? Math.round(r.carbsMax) : '';
+  st.preferences = typeof r.preferences === 'string' ? r.preferences.trim().slice(0, 300) : '';
   if (EN.GOALS[r.goal]) st.goal = r.goal;
   if (r.gymDays >= 0 && r.gymDays <= 7) st.gymDays = Math.round(r.gymDays);
   const extra = [];
@@ -75,6 +82,19 @@ export function saveProfile(st) {
   P.goalWeight = Number(st.goalWeight) >= 25 && Number(st.goalWeight) <= 300 ? round1(st.goalWeight) : null;
   P.goalWeeks = P.goalWeight && Number(st.goalWeeks) > 0 ? Math.round(st.goalWeeks) : null;
   P.rateKgMonth = Number(st.rateKgMonth) > 0 ? round1(st.rateKgMonth) : null;
+  P.diet = EN.DIETS[st.diet] ? st.diet : '';
+  P.conditions = (st.conditions || []).filter((c) => EN.CONDITIONS[c]);
+  P.proteinPerKg = Number(st.proteinPerKg) > 0 ? Math.round(st.proteinPerKg * 10) / 10 : null;
+  P.proteinG = Number(st.proteinG) > 0 ? Math.round(st.proteinG) : null;
+  P.carbsMax = Number(st.carbsMax) > 0 ? Math.round(st.carbsMax) : null;
+  // gustos, dieta y salud: los usa la IA al analizar comidas y al sugerir qué comer
+  const A = S.settings.ai;
+  const lines = [];
+  if (P.diet && P.diet !== 'omnivora') lines.push(`Dieta: ${EN.DIETS[P.diet]}.`);
+  if (P.conditions.length) lines.push(`Salud: ${P.conditions.map((c) => EN.CONDITIONS[c]).join(', ')}.`);
+  if (st.preferences) lines.push(st.preferences);
+  const old = String(A.notes || '').split('\n').filter((l) => !/^(Dieta|Salud): /.test(l) && l.trim() && l.trim() !== String(st.preferences || '').trim());
+  A.notes = [...lines, ...old].join('\n').slice(0, 800);
   P.level = EN.LEVELS[st.level] ? st.level : '';
   P.goal = EN.GOALS[st.goal] ? st.goal : '';
   P.rawGrains = !!st.rawGrains;
@@ -116,6 +136,14 @@ export function openGoals() {
     <div class="field"><span>Actividad habitual</span>${chips('level', Object.entries(EN.LEVELS).map(([k, v]) => [k, v.label]))}</div>
     <div class="field"><span>Objetivo</span>${chips('goal', Object.entries(EN.GOALS).map(([k, v]) => [k, v.label]))}</div>
     <div class="form-grid">${num('gymDays', 'Días de gimnasio por semana', '', '3')}</div>
+    <h3 class="sub-h">Dieta y salud</h3>
+    <div class="field"><span>Forma de comer</span>${chips('diet', Object.entries(EN.DIETS))}</div>
+    <div class="field"><span>Algo de salud a tener en cuenta</span><div class="chip-row wrap">${Object.entries(EN.CONDITIONS).map(([k, l]) => `<button class="chip ${(st.conditions || []).includes(k) ? 'on' : ''}" data-mc="${k}">${esc(l)}</button>`).join('')}</div></div>
+    <div class="form-grid">
+      ${num('proteinPerKg', 'Proteína que querés', 'g/kg', 'automática')}
+      ${num('carbsMax', 'Máximo de carbohidratos', 'g', 'sin tope')}
+    </div>
+    <p class="note">Si lo dejás vacío, la app usa lo recomendado para tu objetivo. Con condiciones de salud, las metas se ajustan solas y te explica por qué.</p>
     <button class="set-row-btn" data-x="raw" style="padding-left:0;padding-right:0">${icon('info', 20)}<span class="grow">Peso el arroz y los fideos en crudo<small>Así la IA interpreta "200 g de arroz" como arroz seco</small></span><span class="switch ${st.rawGrains ? 'on' : ''}"></span></button>
     <button class="btn" style="width:100%;margin-top:6px" data-x="calc">${icon('bolt', 18)} Calcular metas con estos datos</button>
     <h3 class="sub-h">Metas diarias</h3>
@@ -131,14 +159,15 @@ export function openGoals() {
     const el = e.target;
     if (el.id === 'g-ai') st.aiText = el.value;
     else if (el.dataset.t) st[el.dataset.t] = el.value;
-    else if (el.dataset.n) { const v = parseNum(el.value); st[el.dataset.n] = el.value.trim() === '' ? '' : (Number.isFinite(v) ? v : st[el.dataset.n]); const sm = s.body.querySelector('#g-sum'); if (sm) sm.innerHTML = sumLine(); }
+    else if (el.dataset.n) { if (el.dataset.n === 'proteinPerKg') st.proteinG = ''; const v = parseNum(el.value); st[el.dataset.n] = el.value.trim() === '' ? '' : (Number.isFinite(v) ? v : st[el.dataset.n]); const sm = s.body.querySelector('#g-sum'); if (sm) sm.innerHTML = sumLine(); }
   });
   const applyTargets = (t) => applyTargetsTo(st, t);
   const dataOk = () => dataOkOf(st);
   const handler = async (e) => {
-    const b = e.target.closest('[data-x], [data-ch]');
+    const b = e.target.closest('[data-x], [data-ch], [data-mc]');
     if (!b) return;
-    if (b.dataset.ch) { st[b.dataset.ch] = b.dataset.v; redraw(); return; }
+    if (b.dataset.ch) { st[b.dataset.ch] = st[b.dataset.ch] === b.dataset.v && b.dataset.ch === 'diet' ? '' : b.dataset.v; redraw(); return; }
+    if (b.dataset.mc) { const k = b.dataset.mc; st.conditions = (st.conditions || []).includes(k) ? st.conditions.filter((x) => x !== k) : [...(st.conditions || []), k]; redraw(); return; }
     const k = b.dataset.x;
     if (k === 'cancel') s.close();
     else if (k === 'square') { squareMacros(st); redraw(); }

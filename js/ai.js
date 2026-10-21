@@ -39,6 +39,7 @@ export const SYSTEM_PROMPT = `Sos el motor de registro nutricional de ApexTrack,
 - Gimnasio: "fui al gym", "entrené pierna" → status "fui" (detail con la rutina o el músculo si se dice); "no fui" → "no_fui"; "día de descanso" → "descanso".
 - Peso corporal ("me pesé 61,2") → weight.
 - Horas de estudio ("estudié 2 horas", "estudié media hora") → study con hours (número). No son alimentos.
+- Sueño ("dormí 6 horas", "me acosté a la 1 y me levanté a las 8, dormí mal") → sleep con date (el día en que se despertó), hours, bed y wake en HH:MM si los dice, y quality de 1 a 5 si opina cómo durmió (muy mal 1, mal 2, normal 3, bien 4, excelente 5).
 - Actividad física fuera de la rutina de gimnasio ("caminé 40 minutos", "hice 8000 pasos", "corrí 5 km", "jugué al fútbol una hora") → activity con type (caminata, caminata_rapida, correr, bici, natacion, futbol, tenis, baile, eliptico, yoga, pesas, otro) y lo que se dijo: minutes, km o steps.
 - Café, té y mate van en items aunque casi no tengan calorías; sumá azúcar o leche solo si se mencionan.
 
@@ -135,6 +136,7 @@ export const RESPONSE_SCHEMA = {
     weight: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, kg: { type: 'number' } }, required: ['date', 'kg'] } },
     activity: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, type: { type: 'string', enum: ['caminata', 'caminata_rapida', 'correr', 'bici', 'natacion', 'futbol', 'tenis', 'baile', 'eliptico', 'yoga', 'pesas', 'otro'] }, minutes: { type: ['number', 'null'] }, km: { type: ['number', 'null'] }, steps: { type: ['number', 'null'] }, kcal: { type: ['number', 'null'], description: 'Calorías activas medidas por el reloj' }, from_device: { type: 'boolean' }, detail: { type: ['string', 'null'] } }, required: ['date', 'type'] } },
     study: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, hours: { type: 'number' } }, required: ['date', 'hours'] } },
+    sleep: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, hours: { type: ['number', 'null'] }, bed: { type: ['string', 'null'] }, wake: { type: ['string', 'null'] }, quality: { type: ['number', 'null'] } }, required: ['date'] } },
     skipped: { type: 'array', items: { type: 'object', properties: { date: { type: 'string' }, moment: { type: 'string' } }, required: ['date', 'moment'] } },
     questions: { type: 'array', items: { type: 'string' } },
   },
@@ -871,12 +873,21 @@ export function normalizeDraft(raw0, ctx, meta = {}) {
     if (a.from_device) { rec.source = 'reloj'; if (!rec.note) rec.note = 'reloj'; }
     activity.push(rec);
   }
+  const sleep = [];
+  const hm = (v) => (typeof v === 'string' && /^\d{1,2}[:.]\d{2}$/.test(v.trim()) ? v.trim().replace('.', ':').padStart(5, '0') : null);
+  for (const x of Array.isArray(raw?.sleep) ? raw.sleep : []) {
+    const bed = hm(x.bed); const wake = hm(x.wake); let h = num(x.hours);
+    if (!(h > 0) && bed && wake) { const [a, b] = bed.split(':').map(Number); const [c, d] = wake.split(':').map(Number); h = (((c * 60 + d) - (a * 60 + b) + 1440) % 1440) / 60; }
+    if (!(h > 0.5 && h <= 16)) continue;
+    const q = Math.round(num(x.quality));
+    sleep.push({ date: fixDate(x.date), hours: round1(h), bed, wake, quality: q >= 1 && q <= 5 ? q : 0 });
+  }
   const skipped = [];
   for (const s of Array.isArray(raw?.skipped) ? raw.skipped : []) skipped.push({ date: fixDate(s.date), moment: fixMoment(s.moment) });
   const questions = (Array.isArray(raw?.questions) ? raw.questions : []).map(String).filter(Boolean).slice(0, 4);
 
   return {
-    id: uid('d'), createdAt: Date.now(), groups, water, habits, gym, weight, study, activity, skipped, questions, warnings,
+    id: uid('d'), createdAt: Date.now(), groups, water, habits, gym, weight, study, activity, sleep, skipped, questions, warnings,
     transcript: typeof raw?.transcript === 'string' ? raw.transcript : '',
     meta: { ...meta },
   };
@@ -1091,6 +1102,7 @@ const PLAN_SCHEMA = {
     gymDays: { type: ['number', 'null'] },
     kcal: { type: 'number' }, protein: { type: 'number' }, carbs: { type: 'number' }, fat: { type: 'number' },
     sugarMax: { type: 'number' }, waterMl: { type: 'number' },
+    diet: { type: 'string', enum: ['sin_especificar', 'omnivora', 'vegetariana', 'vegana', 'carnivora', 'keto', 'low_carb', 'mediterranea', 'alta_proteina', 'sin_gluten'] }, conditions: { type: 'array', items: { type: 'string', enum: ['diabetes', 'prediabetes', 'hipertension', 'colesterol', 'hipotiroidismo', 'higado_graso', 'renal', 'gota', 'celiaquia', 'embarazo', 'lactancia', 'tca'] } }, proteinPerKg: { type: ['number', 'null'] }, proteinG: { type: ['number', 'null'] }, carbsMax: { type: ['number', 'null'] }, preferences: { type: 'string' },
     explanation: { type: 'string' }, missing: { type: 'array', items: { type: 'string' } }, caution: { type: 'string' },
   },
   required: ['sex', 'goal', 'level', 'explanation'],
@@ -1102,6 +1114,11 @@ const PLAN_PROMPT = `Sos nutricionista. Tu tarea principal es ENTENDER BIEN los 
 - gymDays: días por semana que entrena fuerza o va al gimnasio (0 si no va).
 - Peso objetivo y plazo: si dice "quiero llegar a 75 kg en 6 meses" → goalWeightKg 75 y weeks 26 (1 mes = 4,35 semanas). Si dice un ritmo y un plazo ("subir 2 o 3 kg por mes durante 5 meses") → rateKgMonth 2,5, weeks 22 y goalWeightKg = peso actual + 2,5 × 5. Si solo dice el ritmo, rateKgMonth y weeks null. Si no dice nada de eso, todo null. Anotá lo que pide aunque sea muy rápido: la app lo limita a un ritmo sano.
 - Completá también kcal, protein, carbs, fat, sugarMax y waterMl con una estimación razonable: déficit del 20 % para bajar (nunca menos de 1.200 kcal en mujeres ni 1.500 en hombres); proteína 1,2-1,6 g por kg (1,6-2,0 si entrena fuerza), usando el peso ajustado si tiene sobrepeso; grasas 25-35 % de las calorías; carbohidratos el resto, de modo que 4·proteína + 4·carbohidratos + 9·grasas = kcal.
+- diet: la forma de comer que elige o necesita: vegetariana, vegana, carnivora (solo carne y productos animales), keto, low_carb (baja en carbohidratos), mediterranea, alta_proteina, sin_gluten u omnivora (come de todo). Si no dice nada, sin_especificar.
+- conditions: enfermedades o situaciones que menciona (diabetes, prediabetes o resistencia a la insulina, hipertension, colesterol o triglicéridos, hipotiroidismo, higado_graso, renal, gota o ácido úrico, celiaquia, embarazo, lactancia, tca = trastorno alimentario). Solo las que dice; nunca las supongas.
+- proteinPerKg / proteinG: solo si dice cuánta proteína quiere ("2 a 2,2 g por kilo" → 2,1; "180 g de proteína" → proteinG 180).
+- carbsMax: solo si pide un máximo de carbohidratos por día ("no más de 50 g de carbos" → 50).
+- preferences: una frase corta con gustos, rechazos, alergias o costumbres para tener en cuenta al analizar sus comidas y sugerirle qué comer ("No come cerdo. Alergia al maní. Prefiere 4 comidas por día."). Cadena vacía si no hay.
 - missing: los datos que tuviste que suponer (\"edad\", \"altura\", \"nivel de actividad\"…). No inventes condiciones médicas.
 - caution: solo si menciona una enfermedad (diabetes, hipotiroidismo, hipertensión, renal…), embarazo, lactancia, menos de 18 años, un trastorno de la alimentación o un objetivo extremo: una frase recomendando hacerlo con un profesional. Si no, cadena vacía.
 - explanation: una frase con lo que entendiste (\"Mujer de 53 años, 1,60 m y 90 kg, sedentaria, quiere bajar de peso\").
@@ -1239,7 +1256,7 @@ export function analyzeOffline(text, ctx = buildContext()) {
   }
   markers.sort((a, b) => a.at - b.at);
 
-  const draftRaw = { items: [], water: [], habits: [], gym: [], weight: [], study: [], activity: [], skipped: [], questions: [] };
+  const draftRaw = { items: [], water: [], habits: [], gym: [], weight: [], study: [], activity: [], sleep: [], skipped: [], questions: [] };
   const offlineItems = [];
   const recipe = parseRecipeSentence(t, ctx);
   if (recipe) {
@@ -1286,6 +1303,13 @@ export function analyzeOffline(text, ctx = buildContext()) {
       if (/^(minutos?|min)$/.test(u)) a.minutes = v; else if (/^(horas?|hs)$/.test(u)) a.minutes = v * 60; else if (/^(km|kilometros?)$/.test(u)) a.km = v; else a.steps = v;
       if (!verb && !a.steps) return all;
       draftRaw.activity.push(a);
+      return ' ';
+    });
+    // sueño: "dormí 7 horas", "dormí 6 horas y media"
+    s = s.replace(/\b(?:dormi|dormimos)\s+(?:unas?\s+|como\s+)?(\d+(?:[.,]\d+)?|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:horas?|hs)(\s+y\s+media)?\b(?:\s+(bien|mal|muy bien|muy mal|re bien|re mal|como el orto|para el orto))?/g, (all, q, half, how) => {
+      const h = qtyVal(q) + (half ? 0.5 : 0);
+      const quality = !how ? 0 : /muy bien|re bien/.test(how) ? 5 : /bien/.test(how) ? 4 : /muy mal|re mal|orto/.test(how) ? 1 : 2;
+      if (h > 0.5 && h <= 16) draftRaw.sleep.push({ date: ch.date, hours: h, quality });
       return ' ';
     });
     // horas de estudio
@@ -1343,11 +1367,11 @@ export function analyzeOffline(text, ctx = buildContext()) {
 const CONTEXT_WORDS = new Set(('desayuno desayune almuerzo almorce almuerce merienda meriende merende cena cene colacion media manana tarde noche anoche mediodia '
   + 'post pre entreno entrenamiento entrenar entrene hoy ayer anteayer lunes martes miercoles jueves viernes sabado domingo comi comimos tome tomamos '
   + 'desayunamos almorzamos cenamos me nos poneme pone agrega agregame anota anotame registra hice prepare cocine hecho hecha casero casera caseros caseras '
-  + 'litro litros vaso vasos botella botellas agua gimnasio gym fui descanso descanse dia pese kilo kilos kg ml cc gramo gramos aprox '
+  + 'litro litros vaso vasos botella botellas agua gimnasio gym fui descanso descanse dia pese kilo kilos kg ml cc gramo gramos aprox dormi dormimos hora horas bien mal muy '
   + 'chico chica grande mediano mediana porcion porciones unidad unidades plato platos').split(' '));
 export function localVerdict(draft, text, ctx = null) {
   const items = draft.groups.flatMap((g) => g.items);
-  const extras = draft.water.length + draft.habits.length + draft.gym.length + draft.weight.length + (draft.study || []).length + (draft.activity || []).length;
+  const extras = draft.water.length + draft.habits.length + draft.gym.length + draft.weight.length + (draft.study || []).length + (draft.activity || []).length + (draft.sleep || []).length;
   if (!items.length && !extras) return { ok: false, reason: 'no entendí nada' };
   for (const it of items) {
     if (it.flags?.some((f) => f.type === 'sin_datos') || !(it.per100 || it.fixed)) return { ok: false, reason: `no conozco "${it.name}"` };
