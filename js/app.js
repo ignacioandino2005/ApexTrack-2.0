@@ -799,7 +799,7 @@ function reviewItem(it, gi, ii) {
     if (f.type === 'porcion' && f.grams) fix = `<button data-r="fix-g" data-g="${gi}" data-i="${ii}" data-v="${f.grams}">Usar ${fmt(f.grams)} g</button>`;
     if (f.type === 'valores' && f.foodId) fix = `<button data-r="fix-lib" data-g="${gi}" data-i="${ii}" data-food="${f.foodId}">Usar biblioteca</button>`;
     return `<div class="flag">${icon('alert', 14)}<span>${esc(f.msg)}${fix}</span></div>`;
-  }).join('');
+  }).join('') + AI.fitWarnings(it).map((w) => `<div class="flag">${icon('info', 14)}<span>${esc(w)}</span></div>`).join('');
   return `<div class="rv-item" role="button" tabindex="0" data-r="item" data-g="${gi}" data-i="${ii}">
     <span class="conf ${it.confidence || 'media'}" title="Confianza ${esc(it.confidence || 'media')}"></span>
     <span class="item-main">

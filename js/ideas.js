@@ -90,6 +90,7 @@ export function fromLibrary(moment, per, { offset = 0, limit = 3 } = {}) {
       const grams = Math.max(5, Math.round((g * (f.cat === 'verduras' || f.id === 'canela' ? 1 : k)) / 5) * 5);
       return { id: uid('i'), name: f.n, foodId: f.id, qty: grams, unit: f.liq ? 'ml' : 'g', grams, liq: !!f.liq, per100: per100Of(f), basis: 'tabla', confidence: 'alta' };
     });
+    if (items.some((it) => AI.fitWarnings(it).some((w) => /^No es|gluten/.test(w)))) continue; // no encaja con su dieta
     const m = store.sumMacros(items.map(store.itemMacros));
     const isNew = foods.some(({ f }) => !histNames.has(norm(f.n)));
     opts.push({ id: `lib${opts.length}`, title, items, m, isNew, score: fit(m, per) - (isNew ? 0.1 : 0) });
@@ -112,10 +113,13 @@ const IDEAS_SCHEMA = {
   },
   required: ['options'],
 };
-const IDEAS_PROMPT = `Sos nutricionista deportivo en Argentina (español rioplatense, voseo). Proponé comidas concretas para el momento indicado que encajen con lo que le falta a la persona para cumplir sus metas del día.
-- Devolvé 4 opciones: 2 basadas en lo que suele comer (usá sus alimentos habituales) y 2 NUEVAS que no estén en su historial (isNew true), fáciles, con alimentos que se consiguen en Argentina.
-- Cada opción: title corto, why (una frase: por qué encaja, con números), items con name, quantity, unit (g, ml, unidad, cda, taza…), grams (peso total) y per100 (kcal, protein, carbs, fat, sugars, fiber por 100 g, coherentes con Atwater).
-- Ajustá las porciones para acercarte a las calorías objetivo de esa comida y priorizá la proteína que falta. Respetá los gustos o pedidos de la persona si los da. Respondé solo el JSON.`;
+const IDEAS_PROMPT = `Sos nutricionista deportivo en Argentina (español rioplatense, voseo). Proponé comidas concretas para el momento indicado, pensadas para ESTA persona.
+- Leé con atención lo que pide o tiene ganas y equilibralo con lo que le falta del día. Ejemplo: si es de noche, le faltan muchas calorías y pide "algo que no sea pesado para dormir bien", elegí comidas densas en calorías pero fáciles de digerir (frutos secos, pasta de maní, yogur, avena, banana, arroz, huevos, leche o licuados), sin frituras, grasas pesadas ni picantes, y repartidas en porciones razonables.
+- Respetá SIEMPRE su dieta, sus condiciones de salud y sus gustos o alergias (si es vegetariana, nada de carne; si es celíaca, nada con gluten; con diabetes, poco azúcar y carbohidratos con fibra; con presión alta, poca sal).
+- Tené en cuenta la hora: cerca de dormir, nada muy pesado ni con cafeína; antes de entrenar, carbohidratos fáciles; después, proteína.
+- Devolvé 4 opciones: 2 con alimentos que suele comer y 2 NUEVAS que no estén en su historial (isNew true), fáciles y con alimentos que se consiguen en Argentina.
+- Cada opción: title corto, why (una frase: por qué encaja con lo que pidió y con lo que le falta, con números), items con name, quantity, unit (g, ml, unidad, cda, taza…), grams (peso total) y per100 (kcal, protein, carbs, fat, sugars, fiber por 100 g, coherentes con Atwater).
+- Ajustá las porciones para acercarte a las calorías objetivo de esa comida y a la proteína que falta, salvo que pida otra cosa. Respondé solo el JSON.`;
 
 export async function fromAI(moment, rem, wish = '', onStatus = () => {}) {
   const S = store.S();
@@ -127,8 +131,11 @@ export async function fromAI(moment, rem, wish = '', onStatus = () => {}) {
     `Comido hoy: ${rem.t.kcal} kcal, P ${round0(rem.t.p)} g. Le falta: ${round0(rem.left.kcal)} kcal, P ${round0(rem.left.p)} g, C ${round0(rem.left.c)} g, G ${round0(rem.left.f)} g, en unas ${rem.meals} comidas.`,
     `Objetivo para esta comida: unas ${round0(rem.per.kcal)} kcal y ${round0(rem.per.p)} g de proteína.`,
     `Alimentos que suele comer: ${top.join('; ') || '(sin historial)'}.`,
-    S.settings.ai.notes ? `Notas de la persona: ${S.settings.ai.notes}` : '',
-    wish ? `Lo que tiene ganas o pide: ${wish}` : '',
+    S.settings.ai.notes ? `Dieta, salud y gustos de la persona: ${S.settings.ai.notes}` : '',
+    S.settings.profile?.conditions?.length ? `Condiciones de salud: ${S.settings.profile.conditions.join(', ')}.` : '',
+    S.settings.profile?.diet ? `Forma de comer: ${S.settings.profile.diet}.` : '',
+    S.sleep?.wake ? `Se levanta a las ${S.sleep.wake} y duerme unas ${S.sleep.goalH || 8} h (se acuesta cerca de las ${(() => { const [h, m] = S.sleep.wake.split(':').map(Number); const t = (((h * 60 + m - (S.sleep.goalH || 8) * 60) % 1440) + 1440) % 1440; return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; })()}).` : '',
+    wish ? `LO QUE PIDE AHORA (prioridad): ${wish}` : '',
   ].filter(Boolean).join('\n');
   const res = await AI.callGemini({ ai: S.settings.ai, system: IDEAS_PROMPT, parts: [{ text }], web: false, schema: IDEAS_SCHEMA, onStatus });
   const ctx = AI.buildContext({ baseMoment: moment });
@@ -147,9 +154,11 @@ const card = (o, src) => `<article class="panel idea" style="margin-top:10px">
   <div class="section-head" style="margin:0 0 4px"><h3 style="font-size:16px">${esc(o.title)}</h3>${o.isNew ? '<span class="badge web">Nueva</span>' : o.when ? `<span class="muted" style="font-size:12.5px">${esc(new Date(o.when + 'T12:00').toLocaleDateString('es-AR', { day: 'numeric', month: 'numeric' }))}</span>` : ''}</div>
   ${o.why ? `<p class="note" style="margin:0 0 6px">${esc(o.why)}</p>` : ''}
   <div class="muted" style="font-size:13.5px;line-height:1.5">${o.items.map((it) => `${esc(it.name)} <small>(${esc(portionText(it))})</small>`).join(' · ')}</div>
+  ${o.items.flatMap((it) => AI.fitWarnings(it)).slice(0, 2).map((w) => `<div class="flag" style="margin-top:6px">${icon('info', 14)}<span>${esc(w)}</span></div>`).join('')}
   <div style="display:flex;align-items:center;gap:8px;margin-top:10px"><b class="grow">${fmt(o.m.kcal)} kcal · P ${fmt(o.m.p)} g · C ${fmt(o.m.c)} · G ${fmt(o.m.f)}</b><button class="btn small primary" data-idea="add" data-src="${src}" data-id="${esc(o.id)}">${icon('plus', 16)} Agregar</button></div>
 </article>`;
 
+const WISHES = ['Liviano para dormir bien', 'Que sume muchas calorías', 'Mucha proteína', 'Rápido, sin cocinar', 'Algo dulce', 'Antes de entrenar', 'Con lo que hay en casa'];
 let cache = { hist: [], lib: [], ai: [] };
 export function ideasHtml() {
   const moment = ui.moment || store.momentForTime();
@@ -165,7 +174,8 @@ export function ideasHtml() {
     </section>
     <div class="section-head"><h3>Ideas de la IA</h3></div>
     ${cache.ai.length ? cache.ai.map((o) => card(o, 'ai')).join('') : `<section class="panel">
-      <input class="input" id="idea-wish" placeholder="¿Tenés ganas de algo? Ej.: algo dulce, sin cocinar, con lo que hay en la heladera" value="${esc(ui.wish)}">
+      <textarea class="input" id="idea-wish" rows="2" placeholder="Contale qué querés. Ej.: es tarde y me faltan muchas calorías, pero que no sea pesado para dormir bien">${esc(ui.wish)}</textarea>
+      <div class="chip-row" style="margin-top:8px">${WISHES.map((w) => `<button class="chip soft" data-idea="wish" data-v="${esc(w)}">${esc(w)}</button>`).join('')}</div>
       <button class="btn primary" style="width:100%;margin-top:10px" data-idea="ai" ${ui.aiBusy ? 'disabled' : ''}>${ui.aiBusy ? '<span class="spin"></span><span>Pensando opciones…</span>' : `${icon('sparkle', 18)} Pedir ideas (de siempre y nuevas)`}</button>
       ${hasKey ? '' : '<p class="note" style="margin:8px 0 0">Necesita tu clave de Gemini (Ajustes → Inteligencia artificial).</p>'}
     </section>`}
@@ -188,6 +198,11 @@ async function handle(b, redraw) {
     const v = await pickOption({ title: '¿Para qué comida?', value: moment, options: store.moments().map((m) => ({ value: m.id, label: m.name, icon: 'meal' })) });
     if (v) { ui.moment = v; redraw(); }
   } else if (k === 'more-lib') { ui.lib++; redraw(); }
+  else if (k === 'wish') {
+    const cur = (document.getElementById('idea-wish')?.value || ui.wish || '').trim();
+    ui.wish = cur.includes(b.dataset.v.toLowerCase()) || cur.includes(b.dataset.v) ? cur : [cur, b.dataset.v.toLowerCase()].filter(Boolean).join(', ');
+    redraw();
+  }
   else if (k === 'ai' || k === 'ai-again') {
     if (!store.S().settings.ai.key) { toast('Cargá tu clave de Gemini en Ajustes → Inteligencia artificial', { kind: 'error', ms: 5000 }); return; }
     ui.wish = (document.getElementById('idea-wish')?.value || ui.wish || '').trim();

@@ -75,7 +75,7 @@ Mensaje: "Ayer en la cena eh dos milanesas de pollo al horno con puré y dos vas
 Respuesta:
 {"transcript":"","items":[
 {"date":"2026-03-11","moment":"Cena","said":"dos milanesas de pollo al horno","name":"Milanesa de pollo al horno","ref":null,"quantity":2,"unit":"unidad","grams":300,"per100":{"kcal":195,"protein":22,"carbs":12,"fat":6.5,"sugars":0.5,"fiber":0.5},"state":"cocido","basis":"tabla","confidence":"media","assumption":"Milanesas medianas de 150 g","source":null,"producto":null,"fraction":null,"ingredients":[]},
-{"date":"2026-03-11","moment":"Cena","said":"puré","name":"Puré de papas casero","ref":null,"quantity":1,"unit":"porcion","grams":200,"per100":{"kcal":100,"protein":2,"carbs":15,"fat":3.5,"sugars":1,"fiber":1.5},"state":"cocido","basis":"estimacion","confidence":"baja","assumption":"Porción de 200 g con leche y manteca","source":null,"producto":null,"fraction":null,"ingredients":[]},
+{"date":"2026-03-11","moment":"Cena","said":"puré","name":"Puré de papas casero (con leche y manteca)","ref":null,"quantity":1,"unit":"porcion","grams":200,"per100":{"kcal":110,"protein":2,"carbs":15.5,"fat":4.3,"sugars":1.5,"fiber":1.5},"state":"cocido","basis":"estimacion","confidence":"baja","assumption":"Porción de 200 g con leche y manteca","source":null,"producto":null,"fraction":null,"ingredients":[]},
 {"date":"2026-03-12","moment":"Desayuno","said":"café con leche","name":"Café con leche entera","ref":null,"quantity":1,"unit":"taza","grams":250,"per100":{"kcal":24,"protein":1.3,"carbs":1.9,"fat":1.2,"sugars":1.9,"fiber":0},"state":"listo","basis":"tabla","confidence":"media","assumption":"Taza de 250 ml con 100 ml de leche","source":null,"producto":null,"fraction":null,"ingredients":[]},
 {"date":"2026-03-12","moment":"Desayuno","said":"dos de azúcar","name":"Azúcar","ref":null,"quantity":2,"unit":"cdita","grams":10,"per100":{"kcal":400,"protein":0,"carbs":100,"fat":0,"sugars":100,"fiber":0},"state":"listo","basis":"tabla","confidence":"alta","assumption":null,"source":null,"producto":null,"fraction":null,"ingredients":[]},
 {"date":"2026-03-12","moment":"Desayuno","said":"tres tostadas","name":"Tostadas de pan Riera","ref":null,"quantity":3,"unit":"unidad","grams":27,"per100":{"kcal":400,"protein":11,"carbs":72,"fat":6.5,"sugars":5,"fiber":3.5},"state":"listo","basis":"tabla","confidence":"media","assumption":"Tostadas tipo Riera de 9 g","source":null,"producto":"Tostadas Riera clásicas","fraction":null,"ingredients":[]},
@@ -1618,4 +1618,25 @@ export function evaluateDraft(draft, tc, ctx) {
     checks.push({ ok: !!it && it.grams >= ic.grams[0] && it.grams <= ic.grams[1], msg: `${it ? it.name : 'Alimento'}: ${it ? round0(it.grams) + ' g' : 'no encontrado'} (esperado ${ic.grams[0]}–${ic.grams[1]} g)` });
   }
   return { pass: checks.every((c) => c.ok), checks };
+}
+
+// ---------------------------------------------------------------------------
+// ¿Encaja con la dieta y la salud de la persona? (avisos en la revisión y en las ideas)
+// ---------------------------------------------------------------------------
+const MEAT_RE = /\b(carne|pollo|cerdo|bife|lomo|asado|vacio|milanesa(?! de soja| de berenjena)|hamburguesa(?! de lentejas| vegetal| de soja)|jamon|salame|chorizo|bondiola|panceta|mortadela|pescado|atun|salmon|merluza|mariscos?|langostinos?|morcilla|salchichas?|nuggets|pechuga|pata muslo)\b/;
+const ANIMAL_RE = /\b(leche(?! de almendras| de coco| de avena| vegetal| de soja)|queso|yogur|manteca|huevos?|claras?|miel|crema de leche|dulce de leche|ricota|muzzarella)\b/;
+const GLUTEN_RE = /\b(pan|panes|fideos|pastas?|galletitas?|harina|pizza|empanadas?|milanesas?|medialunas?|alfajor(es)?|tartas?|noquis|ravioles|sorrentinos|tostados?|sandwich|bizcochuelo|facturas?|cerveza|rebozad[oa]s?|avena)\b/;
+const SALT_RE = /\b(fiambres?|salame|jamon crudo|mortadela|salchichas?|papas fritas|snacks?|chizitos|caldo|sopa instantanea|aceitunas|queso (?:rallado|duro|reggianito|sardo)|panceta|chorizo)\b/;
+export function fitWarnings(it, profile = store.S().settings.profile || {}) {
+  const out = [];
+  const n = norm(it.name || '');
+  const diet = profile.diet || ''; const cond = new Set(profile.conditions || []);
+  if ((diet === 'vegetariana' || diet === 'vegana') && MEAT_RE.test(n)) out.push(`No es ${diet === 'vegana' ? 'vegano' : 'vegetariano'}: tiene carne o pescado.`);
+  else if (diet === 'vegana' && ANIMAL_RE.test(n)) out.push('No es vegano: tiene productos de origen animal.');
+  if ((cond.has('celiaquia') || diet === 'sin_gluten') && GLUTEN_RE.test(n) && !/sin (tacc|gluten)|de arroz|de maiz/.test(n)) out.push('Suele tener gluten: fijate que diga "sin TACC".');
+  const m = store.itemMacros(it);
+  if ((cond.has('diabetes') || cond.has('prediabetes')) && m.s >= 15) out.push(`Mucha azúcar para la diabetes (${Math.round(m.s)} g).`);
+  if (diet === 'keto' && m.c >= 15) out.push(`Muchos carbohidratos para keto (${Math.round(m.c)} g).`);
+  if (cond.has('hipertension') && SALT_RE.test(n)) out.push('Suele tener mucha sal: cuidado con la presión.');
+  return out;
 }
