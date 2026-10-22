@@ -55,7 +55,7 @@ await ctx.addInitScript(([today, d1, d2, d3, d9]) => {
   const ent = (date, moment, kcal, p) => ({ id: 'e' + Math.random(), date, moment, items: [it('Comida', kcal, p)], createdAt: 1 });
   localStorage.setItem('apextrack_state_v2', JSON.stringify({
     entries: [ent(d1, 'almuerzo', 2000, 150), ent(d2, 'almuerzo', 2200, 160), ent(today, 'desayuno', 300, 10)],
-    days: { [d1]: { gym: 'fui' }, [d2]: { activity: [{ id: 'a1', type: 'caminata', minutes: 40, km: 3 }] }, [d9]: { gym: 'fui' } },
+    days: { [d1]: { gym: 'fui', activity: [{ id: 'a0', type: 'caminata', minutes: 30, km: 2.5 }] }, [d2]: { activity: [{ id: 'a1', type: 'caminata', minutes: 40, km: 3 }] }, [d9]: { gym: 'fui' } },
     body: [{ id: 'b1', date: d3, weight: 80 }, { id: 'b2', date: d1, weight: 88.8 }],
     gym: { routines: [{ id: 'r1', name: 'Torso', exercises: [{ id: 'x1', name: 'Press banca', sets: 2, reps: '8', rest: 90 }, { id: 'x2', name: 'Remo', sets: 2, reps: '10', rest: 90 }, { id: 'x3', name: 'Press militar', sets: 2, reps: '10', rest: 90 }] }],
       sessions: [{ id: 's1', date: d9, routineId: 'r1', routineName: 'Torso', done: true, exercises: [{ name: 'Press banca', sets: [{ kg: 60, reps: 8 }] }] }], active: null },
@@ -66,7 +66,7 @@ await ctx.addInitScript(([today, d1, d2, d3, d9]) => {
 await page.goto('http://localhost:8767/');
 await page.waitForSelector('.hero');
 await page.waitForTimeout(600);
-ok('Versión 2.2.1', await val(() => window.__apex.store.APP_VERSION) === '2.2.1');
+ok('Versión 2.2.2', await val(() => window.__apex.store.APP_VERSION) === '2.2.2');
 
 // --- Promedios sin el día en curso (a menos que sea tarde y esté la cena)
 const av = await val(() => { const s = window.__apex.store; return { a: s.averages(7), comp: s.dayComplete(new Date().toLocaleDateString('sv-SE')) }; });
@@ -78,7 +78,7 @@ const bgFui = await page.locator('[data-act="gym-day"][data-v="fui"]').evaluate(
 await page.locator('[data-act="gym-day"][data-v="no_fui"]').click(); await page.waitForTimeout(300);
 const bgNo = await page.locator('[data-act="gym-day"][data-v="no_fui"]').evaluate((b) => getComputedStyle(b).backgroundColor);
 await shot('v01-hoy-nofui');
-ok('Hoy: "Fui" blanco y "No fui" rojo', bgFui === 'rgb(255, 255, 255)' && /rgb\(184, 48, 79\)|rgb\(235, 109, 136\)/.test(bgNo), `${bgFui} / ${bgNo}`);
+ok('Hoy: "Fui" negro (modo claro) y "No fui" rojo', bgFui === 'rgb(24, 32, 27)' && /rgb\(184, 48, 79\)|rgb\(235, 109, 136\)/.test(bgNo), `${bgFui} / ${bgNo}`);
 await page.locator('[data-act="gym-day"][data-v="no_fui"]').click(); await page.waitForTimeout(200);
 
 // --- Hoy: deslizar la semana con animación
@@ -106,7 +106,8 @@ await page.locator('.tab[data-tab="diario"]').click(); await page.waitForTimeout
 const mk = await val(() => ({ gym: document.querySelectorAll('.chart .mk-gym').length, walk: document.querySelectorAll('.chart .mk-walk').length }));
 await shot('v02-diario-semana');
 const statTxt = await page.locator('.stat-grid').innerText();
-ok('Diario semana: rayitas de gimnasio y caminata', mk.gym >= 1 && mk.walk >= 1, JSON.stringify(mk));
+const stacked = await val(() => { const g = [...document.querySelectorAll('.chart .mk-gym')]; return g.some((r) => [...document.querySelectorAll('.chart .mk-walk')].some((w) => w.getAttribute('x') === r.getAttribute('x') && +w.getAttribute('y') > +r.getAttribute('y'))); });
+ok('Diario semana: rayitas de gimnasio y caminata (una arriba de otra el mismo día)', mk.gym >= 1 && mk.walk >= 2 && stacked, JSON.stringify(mk));
 ok('Diario: promedio sin hoy', /\(sin hoy\)/.test(statTxt) || !/hoy/.test(statTxt), statTxt.replace(/\s+/g, ' ').slice(0, 90));
 await page.locator('[data-act="dia-mode"][data-v="mes"]').click(); await page.waitForTimeout(300);
 const cm = await val(() => ({ gym: document.querySelectorAll('.cal-d.gym').length, walk: document.querySelectorAll('.cal-d .mk.walk').length }));

@@ -1,4 +1,4 @@
-# ApexTrack 2 — Resumen para continuar (versión 2.2.1, 22/10/2026)
+# ApexTrack 2 — Resumen para continuar (versión 2.2.2, 22/10/2026)
 
 Complementa el resumen de la 2.3.0. Leé esto antes de tocar el código.
 
@@ -52,6 +52,11 @@ Complementa el resumen de la 2.3.0. Leé esto antes de tocar el código.
 7. **Registrar**: si se cierra sin analizar, al volver a abrir están el texto, la foto y el audio (`loggerDraft`, solo en memoria: al recargar se pierde).
 8. **Bebidas como agua**: mate, tereré, té, café, gaseosas, jugos, aguas saborizadas… suman su volumen al agua del día (`AI.hydrationMl`, en la normalización del borrador; no el alcohol ni leche, licuados o yogur). La revisión muestra "+500 ml de agua (Mate)".
 9. Prueba nueva: `dev/test/v221.mjs` (23 controles, gestos táctiles reales con CDP).
+
+## Novedades de la 2.2.2
+1. **Deslizar entre pestañas sin saltos**: la vista corrida sobresalía del ancho y el celular reacomodaba la pantalla (la barra de abajo bajaba ~90 px medio segundo) → `html, body { overflow-x: clip }`. El parpadeo era la animación `fade` de `.view` que se repetía al sacar la clase → `.view.anim-done`. El cambio de pestaña usa `tab-from-r/l` (solo desplazamiento, sin transparencia) y el gesto de costado cancela el desplazamiento vertical del navegador (`touchmove` no pasivo).
+2. **Diario**: gimnasio y caminata el mismo día = dos rayitas, una arriba de la otra (gimnasio arriba). Color del gimnasio: gris en modo claro, blanco semitransparente en oscuro (`--mk-gym`, `--mk-gym-bg`); en el mes, fondo suave con borde.
+3. **Hoy**: "Fui" en negro en modo claro (blanco en oscuro: `var(--ink)`).
 
 ## Pruebas (todas pasan salvo el caso Big Mac sin IA, que es esperable)
 `foods.test`, `offline.test`, `offline_extra`, `ai_pipeline.test`, `client.test` (incluye la consulta de respaldo), `local_first.test`, `server.test`, `backup.test`, `reminders.test`, `vapid.test`, `features.mjs` (50 controles, service worker real), `persist.mjs` (Drive y comunidad simulados, 22 controles), `e2e.mjs` (60 controles; el paso de la planilla V1 se omite si falta `ref/consolidado.xlsx`), `v221.mjs`. En `features.mjs` el control "¿Qué como?: lo que queda, historial y biblioteca" falla también sin estos cambios (depende de la hora del día): revisar.

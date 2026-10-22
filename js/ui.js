@@ -257,12 +257,13 @@ export { isoDate };
 export const swipes = {};
 let dragging = false;
 
-export function slideIn(el, dir) {
+const SLIDE_CLS = ['slide-from-r', 'slide-from-l', 'tab-from-r', 'tab-from-l'];
+export function slideIn(el, dir, kind = 'slide') {
   if (!el || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-  el.classList.remove('slide-from-r', 'slide-from-l');
+  el.classList.remove(...SLIDE_CLS, 'anim-done');
   void el.offsetWidth;
-  el.classList.add(dir > 0 ? 'slide-from-r' : 'slide-from-l');
-  el.addEventListener('animationend', () => el.classList.remove('slide-from-r', 'slide-from-l'), { once: true });
+  el.classList.add(`${kind}-from-${dir > 0 ? 'r' : 'l'}`);
+  el.addEventListener('animationend', () => { el.classList.remove(...SLIDE_CLS); el.classList.add('anim-done'); }, { once: true });
 }
 
 function scrollsSideways(el, stop) {
@@ -300,10 +301,13 @@ function scrollsSideways(el, stop) {
       g.axis = Math.abs(dx) > Math.abs(dy) * 1.3 ? 'x' : 'y';
       if (g.axis === 'y') { g = null; return; }
       g.el.style.transition = 'none';
+      g.el.style.willChange = 'transform';
     }
+    // gesto de costado: que el navegador no desplace la página ni mueva sus barras mientras tanto
+    if (e.cancelable) e.preventDefault();
     g.dx = dx;
-    g.el.style.transform = `translateX(${dx * (g.name === '$tab' ? 0.35 : 0.6)}px)`;
-  }, { passive: true });
+    g.el.style.transform = `translate3d(${dx * (g.name === '$tab' ? 0.3 : 0.6)}px,0,0)`;
+  }, { passive: false });
   const end = () => {
     if (!g) return;
     const { name, el, dx, axis } = g; g = null;
@@ -318,14 +322,14 @@ function scrollsSideways(el, stop) {
     const dir = dx < 0 ? 1 : -1;
     let moved = false;
     try { moved = !!swipes[name]?.(dir); } catch (err) { console.error(err); }
-    if (!moved) { back(); return; }
-    el.style.transition = ''; el.style.transform = '';
+    if (!moved) { back(); setTimeout(() => { el.style.willChange = ''; }, 220); return; }
+    el.style.transition = ''; el.style.transform = ''; el.style.willChange = '';
     vibrate(6);
     const fresh = name === '$tab' ? document.getElementById('view') : document.querySelector(`[data-swipe="${name}"]`);
-    slideIn(fresh || el, dir);
+    slideIn(fresh || el, dir, name === '$tab' ? 'tab' : 'slide');
   };
   document.addEventListener('touchend', end, { passive: true });
-  document.addEventListener('touchcancel', () => { if (g) { g.el.style.transform = ''; g.el.style.transition = ''; } g = null; }, { passive: true });
+  document.addEventListener('touchcancel', () => { if (g) { g.el.style.transform = ''; g.el.style.transition = ''; g.el.style.willChange = ''; } g = null; }, { passive: true });
   // con mouse (computadora): solo los [data-swipe], sin seguir al puntero
   let m = null;
   document.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') return; const t = e.target.closest?.('[data-swipe]'); m = t ? { name: t.dataset.swipe, x0: e.clientX, y0: e.clientY } : null; });

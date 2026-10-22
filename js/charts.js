@@ -25,7 +25,7 @@ function colPath(x, y, w, h, r = 4) {
  */
 export function weekBars({ days, goal = 0, sel = null, unit = 'kcal', dec = 0, today = null, height = 176, marks = null }) {
   // marks(fecha) → { gym, walk }: rayitas de color debajo del día (entrenó / caminó)
-  const W = 340; const H = height + (marks ? 8 : 0); const padL = 34; const padR = 8; const padT = 18; const padB = marks ? 32 : 24;
+  const W = 340; const H = height + (marks ? 12 : 0); const padL = 34; const padR = 8; const padT = 18; const padB = marks ? 36 : 24;
   const plotW = W - padL - padR; const plotH = H - padT - padB;
   const maxV = niceMax(Math.max(goal * 1.15, ...days.map((d) => d.value || 0), 1));
   const y = (v) => padT + plotH - (v / maxV) * plotH;
@@ -44,12 +44,13 @@ export function weekBars({ days, goal = 0, sel = null, unit = 'kcal', dec = 0, t
     if (v > 0) bars += `<path d="${colPath(cx - bw / 2, top, bw, padT + plotH - top)}" class="bar ${isSel ? 'sel' : ''}"/>`;
     else if (!future) bars += `<rect x="${cx - bw / 2}" y="${padT + plotH - 2}" width="${bw}" height="2" rx="1" class="bar-empty"/>`;
     const dow = DIAS_INICIAL[parseISO(d.date).getDay()];
-    bars += `<text x="${cx}" y="${H - (marks ? 14 : 8)}" class="tick xl ${isSel ? 'on' : ''}" text-anchor="middle">${dow}${parseISO(d.date).getDate()}</text>`;
+    bars += `<text x="${cx}" y="${H - (marks ? 17 : 8)}" class="tick xl ${isSel ? 'on' : ''}" text-anchor="middle">${dow}${parseISO(d.date).getDate()}</text>`;
     const mk = marks && !future ? marks(d.date) : null;
     if (mk && (mk.gym || mk.walk)) {
-      const kinds = [mk.gym && 'gym', mk.walk && 'walk'].filter(Boolean);
-      const w = bw + 4; const seg = (w - (kinds.length - 1) * 2) / kinds.length;
-      kinds.forEach((k, j) => { bars += `<rect x="${cx - w / 2 + j * (seg + 2)}" y="${H - 6}" width="${seg}" height="3.5" rx="1.75" class="mk-${k}"/>`; });
+      // una arriba de la otra: gimnasio arriba, caminata abajo (siempre en el mismo renglón)
+      const w = bw + 4;
+      if (mk.gym) bars += `<rect x="${cx - w / 2}" y="${H - 10.5}" width="${w}" height="3.5" rx="1.75" class="mk-gym"/>`;
+      if (mk.walk) bars += `<rect x="${cx - w / 2}" y="${H - 5.5}" width="${w}" height="3.5" rx="1.75" class="mk-walk"/>`;
     }
     if (isSel && v > 0) bars += `<text x="${cx}" y="${Math.max(11, top - 6)}" class="val" text-anchor="middle">${fmt(v, dec)}</text>`;
     bars += `<rect x="${padL + band * i}" y="${padT}" width="${band}" height="${plotH + padB}" class="hit" data-date="${d.date}" tabindex="0" role="button" aria-label="${esc(d.date)}: ${fmt(v, dec)} ${unit}"/>`;
