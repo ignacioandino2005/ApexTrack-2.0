@@ -1,10 +1,11 @@
-# ApexTrack 2 — Resumen para continuar (versión 2.8.0, 21/10/2026)
+# ApexTrack 2 — Resumen para continuar (versión 2.2.1, 22/10/2026)
 
 Complementa el resumen de la 2.3.0. Leé esto antes de tocar el código.
 
 ## Repositorio
 - `ignacioandino2005/apextrack-2.0`, rama `main`. La app está en la raíz (ya no hay carpeta `app/`). Las pruebas están en `dev/test` y se corren desde ahí (`npm install` en `dev/`).
 - Versión: `APP_VERSION` en `js/store.js` y `VERSION` en `sw.js` (cambiar las dos en cada entrega).
+- **Numeración (desde el 22/10/2026)**: se pasó de 2.8.1 a **2.2.1** a pedido del usuario. En cada entrega se suma 1 al último dígito; al llegar a 10 vuelve a 0 y sube el del medio, y así (2.2.1 → 2.2.2 … 2.2.9 → 2.2.10 → 2.3.0; ante la duda, preguntar). Las secciones "2.4.0" a "2.8.0" de abajo son la numeración anterior.
 - Configuración del desarrollador: `js/config.js` (`GOOGLE_CLIENT_ID`, `COMMUNITY_URL`), ya cargados. La app de Google tiene que estar "En producción" (con la política de privacidad `privacidad.html`).
 
 ## Novedades de la 2.4.0
@@ -41,8 +42,19 @@ Complementa el resumen de la 2.3.0. Leé esto antes de tocar el código.
 1. **Metas personalizadas**: la IA (bienvenida y Perfil y metas) extrae además `diet` (vegetariana, vegana, carnivora, keto, low_carb, mediterranea, alta_proteina, sin_gluten, omnivora), `conditions` (diabetes, prediabetes, hipertension, colesterol, hipotiroidismo, higado_graso, renal, gota, celiaquia, embarazo, lactancia, tca), `proteinPerKg`/`proteinG`, `carbsMax` y `preferences` (gustos, alergias). `calcTargets` los respeta: proteína pedida (sobre el peso real si IMC ≤ 27, o ≤ 30 entrenando; tope 2,5 g/kg y 45 %), tope de carbohidratos con grasas que completan (máx. 75 %) y algo más de proteína, diabetes ≤ 40 % de carbohidratos y azúcar ≤ 5 %, renal 0,8 g/kg, embarazo/lactancia sin déficit, tca con déficit suave, vegana +10 % de proteína… y explica cada ajuste (`notes`). Dieta, salud y gustos se guardan en `settings.ai.notes` para el análisis de comidas y las ideas. Perfil y metas tiene "Dieta y salud".
 2. **Pestaña Sueño** (`js/sleep.js`): "Me voy a dormir" / "Me desperté" o registrar a mano (horas con botones, calidad 1-5, tiempo despierto, qué pasó ese día), meta y hora de levantarse → hora ideal para acostarse, promedio, deuda, regularidad, calidad, gráfico semanal y "lo que influye en tu sueño" (factores marcados, gimnasio, comer después de cenar, acostarse tarde). En Hoy, fila Sueño; recordatorio "Hora de dormir"; resumen semanal con sueño; la IA y la IA propia entienden "dormí 6 horas y media, mal".
 
+## Novedades de la 2.2.1 (después de la 2.8.1 anterior)
+1. **Gimnasio**: con una sesión en curso la pestaña personalizable queda en Gym hasta "Terminar y guardar" (`paintSlot`). Botón **Fallo** (llama) entre Reps y el tilde; se guarda `fail: true` en la serie. **Ordenar arrastrando** (mantener apretado, o desde el asa de flechas) en la sesión y en Editar rutina: motor genérico en `ui.js` (`[data-sort]` / `[data-sort-item]` / `[data-sort-handle]`, evento `sorted`). "Esta semana" se desliza a semanas anteriores y tiene vista **Mes** (`gymCalendar`, estado `GC`). **Editar sesiones** del historial (`editSession`: nombre, ejercicios, series, kilos, reps, fallo, agregar/quitar, ordenar).
+2. **Diario**: rayita azul (gimnasio) y verde (caminata u otra actividad, o meta de pasos) debajo de cada día del gráfico (`weekBars({ marks })`, `moveMarks`); en el mes, el número del día de gimnasio va en negrita con fondo azul suave y la caminata con rayita verde (el puntito de la meta pasa a la esquina). Se desliza también el mes.
+3. **Promedios sin el día en curso**: `store.dayComplete(fecha)` (hoy cuenta solo después de las 22 h y con la cena registrada) y `store.statDays`; lo usan `averages`, Diario, Progreso, el análisis con IA (`insights.js`) y el resumen semanal (`weekly.js`).
+4. **Hoy**: Gimnasio "Fui" en blanco, "No fui" en rojo (`.gym-seg`).
+5. **Deslizar con animación** (`ui.js`, `swipes[nombre]`): el contenido sigue al dedo y entra desde el costado (semana de Hoy, semana y mes del Diario, gimnasio). **Deslizar entre pestañas** (`swipes.$tab`, en el orden de la barra) salvo si el gesto empieza en algo deslizable o con desplazamiento lateral, en campos, gráficos u hojas. `overscroll-behavior-x: none` evita el "atrás" del navegador.
+6. **Progreso → Pesajes**: lista para corregir (peso y día) o borrar (con Deshacer) (`openWeighIns`, `store.deleteWeight`).
+7. **Registrar**: si se cierra sin analizar, al volver a abrir están el texto, la foto y el audio (`loggerDraft`, solo en memoria: al recargar se pierde).
+8. **Bebidas como agua**: mate, tereré, té, café, gaseosas, jugos, aguas saborizadas… suman su volumen al agua del día (`AI.hydrationMl`, en la normalización del borrador; no el alcohol ni leche, licuados o yogur). La revisión muestra "+500 ml de agua (Mate)".
+9. Prueba nueva: `dev/test/v221.mjs` (23 controles, gestos táctiles reales con CDP).
+
 ## Pruebas (todas pasan salvo el caso Big Mac sin IA, que es esperable)
-`foods.test`, `offline.test`, `offline_extra`, `ai_pipeline.test`, `client.test` (incluye la consulta de respaldo), `local_first.test`, `server.test`, `backup.test`, `reminders.test`, `vapid.test`, `features.mjs` (50 controles, service worker real), `persist.mjs` (Drive y comunidad simulados, 22 controles), `e2e.mjs` (60 controles; el paso de la planilla V1 se omite si falta `ref/consolidado.xlsx`).
+`foods.test`, `offline.test`, `offline_extra`, `ai_pipeline.test`, `client.test` (incluye la consulta de respaldo), `local_first.test`, `server.test`, `backup.test`, `reminders.test`, `vapid.test`, `features.mjs` (50 controles, service worker real), `persist.mjs` (Drive y comunidad simulados, 22 controles), `e2e.mjs` (60 controles; el paso de la planilla V1 se omite si falta `ref/consolidado.xlsx`), `v221.mjs`. En `features.mjs` el control "¿Qué como?: lo que queda, historial y biblioteca" falla también sin estos cambios (depende de la hora del día): revisar.
 
 ## Ideas pendientes
 - En el servidor: pegar el nuevo `comunidad.gs`, correr `instalarAvisos()` y publicar versión nueva.

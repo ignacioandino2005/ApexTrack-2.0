@@ -247,3 +247,168 @@ export function setBusy(btn, busy, text) {
 }
 
 export { isoDate };
+
+// ---------- Deslizar con animación ----------
+/**
+ * swipes[nombre] = (dir) => boolean. dir = 1 siguiente (el dedo va a la izquierda), -1 anterior.
+ * Un elemento con data-swipe="nombre" sigue al dedo y, si cambia, el contenido nuevo entra deslizándose.
+ * Si el gesto empieza fuera de un [data-swipe] y fuera de algo que se desplaza de costado, swipes.$tab cambia de pestaña.
+ */
+export const swipes = {};
+let dragging = false;
+
+export function slideIn(el, dir) {
+  if (!el || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  el.classList.remove('slide-from-r', 'slide-from-l');
+  void el.offsetWidth;
+  el.classList.add(dir > 0 ? 'slide-from-r' : 'slide-from-l');
+  el.addEventListener('animationend', () => el.classList.remove('slide-from-r', 'slide-from-l'), { once: true });
+}
+
+function scrollsSideways(el, stop) {
+  for (let n = el; n && n !== stop && n !== document.body; n = n.parentElement) {
+    if (n.scrollWidth > n.clientWidth + 2) {
+      const ox = getComputedStyle(n).overflowX;
+      if (ox === 'auto' || ox === 'scroll') return true;
+    }
+  }
+  return false;
+}
+
+(function swipeEngine() {
+  let g = null; // gesto en curso
+  const NO_TAB = 'input, textarea, select, .chip-row, .chart-box, .chart, .tabbar, .slot-menu, .timer-pill, .sheet-wrap, [data-sort-item], .no-swipe';
+  document.addEventListener('touchstart', (e) => {
+    g = null;
+    if (e.touches.length !== 1 || dragging) return;
+    const t = e.touches[0];
+    const target = e.target.closest?.('[data-swipe]');
+    if (target && target.closest('.sheet-wrap') && !swipes[target.dataset.swipe]) return;
+    let name = target?.dataset.swipe || null;
+    if (!name) {
+      if (stack.length || !swipes.$tab || !e.target.closest?.('#view') || e.target.closest(NO_TAB) || scrollsSideways(e.target, document.getElementById('view'))) return;
+      name = '$tab';
+    }
+    g = { name, el: name === '$tab' ? document.getElementById('view') : target, x0: t.clientX, y0: t.clientY, dx: 0, axis: null };
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (!g || dragging) return;
+    const t = e.touches[0];
+    const dx = t.clientX - g.x0; const dy = t.clientY - g.y0;
+    if (!g.axis) {
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+      g.axis = Math.abs(dx) > Math.abs(dy) * 1.3 ? 'x' : 'y';
+      if (g.axis === 'y') { g = null; return; }
+      g.el.style.transition = 'none';
+    }
+    g.dx = dx;
+    g.el.style.transform = `translateX(${dx * (g.name === '$tab' ? 0.35 : 0.6)}px)`;
+  }, { passive: true });
+  const end = () => {
+    if (!g) return;
+    const { name, el, dx, axis } = g; g = null;
+    if (axis !== 'x') return;
+    // el soltar de un deslizamiento no es un toque (el contenido nuevo puede quedar bajo el dedo)
+    const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+    document.addEventListener('click', stop, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener('click', stop, { capture: true }), 400);
+    const back = () => { el.style.transition = 'transform .2s ease'; el.style.transform = ''; setTimeout(() => { el.style.transition = ''; }, 220); };
+    const min = name === '$tab' ? 80 : 50;
+    if (Math.abs(dx) < min) { back(); return; }
+    const dir = dx < 0 ? 1 : -1;
+    let moved = false;
+    try { moved = !!swipes[name]?.(dir); } catch (err) { console.error(err); }
+    if (!moved) { back(); return; }
+    el.style.transition = ''; el.style.transform = '';
+    vibrate(6);
+    const fresh = name === '$tab' ? document.getElementById('view') : document.querySelector(`[data-swipe="${name}"]`);
+    slideIn(fresh || el, dir);
+  };
+  document.addEventListener('touchend', end, { passive: true });
+  document.addEventListener('touchcancel', () => { if (g) { g.el.style.transform = ''; g.el.style.transition = ''; } g = null; }, { passive: true });
+  // con mouse (computadora): solo los [data-swipe], sin seguir al puntero
+  let m = null;
+  document.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'mouse') return; const t = e.target.closest?.('[data-swipe]'); m = t ? { name: t.dataset.swipe, x0: e.clientX, y0: e.clientY } : null; });
+  document.addEventListener('pointerup', (e) => {
+    if (!m || e.pointerType !== 'mouse') return;
+    const dx = e.clientX - m.x0; const dy = e.clientY - m.y0; const { name } = m; m = null;
+    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.5) { const dir = dx < 0 ? 1 : -1; if (swipes[name]?.(dir)) slideIn(document.querySelector(`[data-swipe="${name}"]`), dir); }
+  });
+})();
+
+// ---------- Ordenar arrastrando (mantener apretado) ----------
+/**
+ * Dentro de un [data-sort="nombre"], cada hijo [data-sort-item] se puede mantener apretado y arrastrar.
+ * Un [data-sort-handle] arrastra al instante. Al soltar se dispara el evento "sorted" en el contenedor
+ * con detail { from, to, name }.
+ */
+(function sortEngine() {
+  let p = null; // { box, el, items, from, y0, grab, timer, active, id, scroller, raf, lastY }
+  const SKIP = 'input, textarea, select, button:not([data-sort-handle]), a, [contenteditable]';
+  const scrollerOf = (el) => { for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) { const oy = getComputedStyle(n).overflowY; if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight) return n; } return null; };
+  const place = () => {
+    const { el, lastY } = p;
+    const sibs = [...p.box.querySelectorAll(':scope > [data-sort-item]')];
+    const i = sibs.indexOf(el);
+    const prev = sibs[i - 1]; const next = sibs[i + 1];
+    if (prev) { const r = prev.getBoundingClientRect(); if (lastY < r.top + r.height / 2) { p.box.insertBefore(el, prev); } }
+    if (next) { const r = next.getBoundingClientRect(); if (lastY > r.top + r.height / 2) { p.box.insertBefore(next, el); } }
+    el.style.transform = 'none';
+    const top = el.getBoundingClientRect().top;
+    el.style.transform = `translateY(${lastY - p.grab - top}px) scale(1.02)`;
+  };
+  const loop = () => {
+    if (!p?.active) return;
+    const h = window.innerHeight; const edge = 70;
+    const sp = p.lastY < edge ? -(edge - p.lastY) / 4 : p.lastY > h - edge - 70 ? (p.lastY - (h - edge - 70)) / 4 : 0;
+    if (sp) { if (p.scroller) p.scroller.scrollTop += sp; else window.scrollBy(0, sp); place(); }
+    p.raf = requestAnimationFrame(loop);
+  };
+  const activate = () => {
+    if (!p) return;
+    p.active = true; dragging = true;
+    p.from = [...p.box.querySelectorAll(':scope > [data-sort-item]')].indexOf(p.el);
+    p.grab = p.y0 - p.el.getBoundingClientRect().top;
+    p.lastY = p.y0;
+    p.scroller = scrollerOf(p.box);
+    p.el.classList.add('sorting'); p.box.classList.add('sort-on');
+    vibrate(25);
+    place();
+    p.raf = requestAnimationFrame(loop);
+  };
+  const finish = (cancel) => {
+    if (!p) return;
+    clearTimeout(p.timer);
+    const was = p; p = null;
+    if (!was.active) return;
+    cancelAnimationFrame(was.raf);
+    dragging = false;
+    was.el.classList.remove('sorting'); was.box.classList.remove('sort-on');
+    was.el.style.transform = '';
+    const to = [...was.box.querySelectorAll(':scope > [data-sort-item]')].indexOf(was.el);
+    if (!cancel && to !== was.from) was.box.dispatchEvent(new CustomEvent('sorted', { bubbles: true, detail: { from: was.from, to, name: was.box.dataset.sort } }));
+    // evitar que el soltar se tome como un toque
+    const stop = (e) => { e.stopPropagation(); e.preventDefault(); };
+    document.addEventListener('click', stop, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener('click', stop, { capture: true }), 350);
+  };
+  document.addEventListener('pointerdown', (e) => {
+    if (p || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    const el = e.target.closest?.('[data-sort-item]');
+    const box = el?.parentElement;
+    if (!el || !box?.matches('[data-sort]')) return;
+    const handle = e.target.closest('[data-sort-handle]');
+    if (!handle && e.target.closest(SKIP)) return;
+    p = { box, el, x0: e.clientX, y0: e.clientY, active: false, id: e.pointerId };
+    if (handle) activate(); else p.timer = setTimeout(activate, 450);
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (!p || e.pointerId !== p.id) return;
+    if (!p.active) { if (Math.abs(e.clientX - p.x0) > 9 || Math.abs(e.clientY - p.y0) > 9) { clearTimeout(p.timer); p = null; } return; }
+    p.lastY = e.clientY; place();
+  });
+  document.addEventListener('touchmove', (e) => { if (p?.active) e.preventDefault(); }, { passive: false });
+  document.addEventListener('contextmenu', (e) => { if (p) e.preventDefault(); });
+  document.addEventListener('pointerup', () => finish(false));
+  document.addEventListener('pointercancel', () => finish(!p?.active));
+})();

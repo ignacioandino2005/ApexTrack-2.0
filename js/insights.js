@@ -19,7 +19,7 @@ export function buildSummary(rangeKey = 'mes', custom = null) {
   const days = dateRange(from, today);
   const g = store.goals();
   const p = S.settings.profile;
-  const logged = days.filter((d) => store.entriesOn(d).length);
+  const logged = store.statDays(days); // hoy no cuenta hasta que termine (o sea tarde y esté todo registrado)
   const rows = days.map((d) => {
     const t = store.dayTotals(d); const rec = store.day(d); const en = EN.dayEnergy(d);
     const habs = store.habitsList().filter((h) => h.kind !== 'hours');
@@ -29,7 +29,7 @@ export function buildSummary(rangeKey = 'mes', custom = null) {
       late: store.entriesOn(d).filter((e) => e.moment === 'post_cena').reduce((x, e) => x + store.entryMacros(e).kcal, 0),
     };
   });
-  const L = rows.filter((r) => r.items);
+  const L = rows.filter((r) => r.items && store.dayComplete(r.d)); // hoy no cuenta hasta que termine
   const avg = (k, arr = L) => (arr.length ? arr.reduce((x, r) => x + (r[k] || 0), 0) / arr.length : 0);
   const goal = EN.goalMode();
   const lines = [];
@@ -93,7 +93,7 @@ No des consejos médicos; si ves algo preocupante (comer muy poco, bajar muy rá
 
 export async function runInsights(rangeKey, onStatus, custom = null) {
   const sum = buildSummary(rangeKey, custom);
-  if (sum.daysLogged < 2) throw new Error('Hacen falta al menos 2 días con comidas registradas en el período.');
+  if (sum.daysLogged < 2) throw new Error(`Hacen falta al menos 2 días completos con comidas registradas en el período${store.entriesOn(todayISO()).length && !store.dayComplete(todayISO()) ? ' (hoy cuenta cuando termine el día)' : ''}.`);
   const ai = store.S().settings.ai;
   const label = custom?.label || RANGES[rangeKey]?.[0] || 'Período';
   const res = await AI.callGemini({ ai, system: PROMPT, parts: [{ text: `${label.toUpperCase()}\n${sum.text}` }], web: false, schema: SCHEMA, onStatus });

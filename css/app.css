@@ -419,12 +419,12 @@ textarea.input { resize: vertical; line-height: 1.45; }
 .ex-meta { font-size: 13px; color: var(--ink-3); margin-top: 2px; }
 .ex-hint { font-size: 13px; color: var(--ink-2); background: var(--surface-2); border-radius: 10px; padding: 7px 10px; margin-top: 8px; }
 .sets { display: grid; gap: 6px; margin-top: 10px; }
-.set-row { display: grid; grid-template-columns: 26px 1fr 1fr 44px; gap: 8px; align-items: center; }
+.set-row { display: grid; grid-template-columns: 26px 1fr 1fr 40px 44px; gap: 8px; align-items: center; }
 .set-row > span { font-size: 13px; font-weight: 700; color: var(--ink-3); text-align: center; }
 .set-in { min-height: 44px; text-align: center; font-weight: 650; font-variant-numeric: tabular-nums; padding: 8px; }
 .set-ok { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-3); }
 .set-ok.on { background: var(--good); border-color: var(--good); color: #fff; }
-.set-labels { display: grid; grid-template-columns: 26px 1fr 1fr 44px; gap: 8px; font-size: 12px; color: var(--ink-3); font-weight: 600; text-align: center; }
+.set-labels { display: grid; grid-template-columns: 26px 1fr 1fr 40px 44px; gap: 8px; font-size: 12px; color: var(--ink-3); font-weight: 600; text-align: center; }
 .routine-card { width: 100%; text-align: left; background: var(--surface); border-radius: var(--r-lg); padding: 14px 16px; box-shadow: var(--shadow); display: flex; align-items: center; gap: 12px; }
 .routine-card + .routine-card { margin-top: 8px; }
 .routine-card h4 { margin: 0; font-size: 16px; font-weight: 700; }
@@ -565,3 +565,49 @@ div.field > span { display: block; margin-bottom: 6px; }
 .tour-dots { display: flex; gap: 6px; justify-content: center; margin-top: 18px; }
 .tour-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
 .tour-dots i.on { width: 20px; border-radius: 4px; background: var(--accent); }
+
+/* Gimnasio en Hoy: "Fui" en blanco, "No fui" en rojo, "Descanso" marcado */
+.gym-seg button.on[data-v="fui"] { background: #FFFFFF; color: #111512; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); }
+.gym-seg button.on[data-v="no_fui"] { background: var(--bad); color: #FFFFFF; }
+.gym-seg button.on[data-v="descanso"] { background: var(--ink-2); color: var(--surface); }
+
+/* Deslizar: el contenido nuevo entra desde el costado */
+@keyframes slide-from-r { from { transform: translateX(42px); opacity: .15; } to { transform: none; opacity: 1; } }
+@keyframes slide-from-l { from { transform: translateX(-42px); opacity: .15; } to { transform: none; opacity: 1; } }
+.slide-from-r { animation: slide-from-r .24s cubic-bezier(.2, .8, .2, 1); }
+.slide-from-l { animation: slide-from-l .24s cubic-bezier(.2, .8, .2, 1); }
+#view { overflow-x: clip; }
+@media (prefers-reduced-motion: reduce) { .slide-from-r, .slide-from-l { animation: none; } }
+
+/* Ordenar arrastrando */
+[data-sort-item] { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+[data-sort-item] input, [data-sort-item] textarea { -webkit-user-select: text; user-select: text; }
+[data-sort-item].sorting { position: relative; z-index: 30; box-shadow: 0 10px 28px rgba(0, 0, 0, .28); transition: none; opacity: .97; }
+.sort-on [data-sort-item]:not(.sorting) { transition: transform .15s ease; }
+[data-sort-handle] { touch-action: none; cursor: grab; color: var(--ink-3); }
+
+/* Días que entrenó o caminó (Diario): rayita en el gráfico; en el mes, número en negrita con fondo (gimnasio) y rayita abajo (caminata) */
+.chart .mk-gym { fill: var(--accent); } .chart .mk-walk { fill: var(--good); }
+.mk { display: inline-block; width: 14px; height: 4px; border-radius: 2px; }
+.mk.gym { background: var(--accent); } .mk.walk { background: var(--good); }
+.mv-legend { margin-top: 6px; }
+.cal-d.gym { background: var(--accent-soft); color: var(--accent); font-weight: 800; }
+.cal-d.gym.sel { background: var(--ink); color: var(--bg); }
+.cal-d .mk.walk { position: absolute; bottom: 4px; width: 40%; height: 3.5px; }
+.cal-d.walk .dot { bottom: auto; top: 5px; right: 5px; width: 5px; height: 5px; }
+
+/* Serie al fallo */
+.set-fail { width: 40px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-3); }
+.set-fail.on { background: var(--bad); border-color: var(--bad); color: #fff; }
+.set-labels span:nth-child(4) { font-size: 11px; }
+.grip svg { transform: rotate(90deg); }
+/* Semana / mes del gimnasio */
+.seg-ctl.mini { min-width: 0; padding: 3px; }
+.seg-ctl.mini button { min-height: 32px; padding: 0 12px; font-size: 13px; }
+.week-dots.wk-l { justify-content: space-between; }
+.week-dots.wk-l > span { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; }
+.week-dots.wk-l i { width: 100%; max-width: 34px; }
+.week-dots.wk-l i.tod { box-shadow: 0 0 0 1.5px var(--accent); }
+.week-dots.wk-l small { font-size: 11px; color: var(--ink-3); font-weight: 600; }
+/* los deslizamientos de costado son de la app: sin el "atrás" del navegador al deslizar */
+html, body { overscroll-behavior-x: none; }

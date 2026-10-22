@@ -10,7 +10,7 @@ import {
 } from './foods.js';
 import { icon } from './icons.js';
 import {
-  openSheet, toast, confirmDialog, pickOption, pickDate, promptText, formSheet, setRootBack, setBusy, sheetsOpen, closeAllSheets,
+  openSheet, toast, confirmDialog, pickOption, pickDate, promptText, formSheet, setRootBack, setBusy, sheetsOpen, closeAllSheets, swipes,
 } from './ui.js';
 import { canDictate, canRecord, startDictation, startRecording } from './voice.js';
 import { pickImage, scanBarcode, lookupBarcode, canScan, shrink } from './camera.js';
@@ -47,7 +47,8 @@ function paintSlot() {
   const b = document.querySelector('.tab[data-slot]');
   if (!b) return;
   // si se está viendo otra pestaña personalizable (elegida con la flechita), el botón la muestra
-  const t = SLOT_TABS[ui.tab] ? ui.tab : slotTab();
+  // mientras hay una sesión de gimnasio en curso, la pestaña queda en Gym hasta terminarla
+  const t = SLOT_TABS[ui.tab] ? ui.tab : (store.S().gym?.active ? 'gym' : slotTab());
   if (b.dataset.tab !== t) { b.dataset.tab = t; b.innerHTML = `${icon(SLOT_TABS[t][1], 24)}${SLOT_TABS[t][0]}`; }
 }
 
@@ -227,7 +228,7 @@ function viewHoy() {
       <div class="chips">${chips || '<span class="muted">Sin hábitos configurados.</span>'}</div>
       <div class="day-extras panel" style="margin-top:12px">
         <div class="kv"><span>${icon('dumbbell', 18)}Gimnasio</span>
-          <div class="seg-ctl" style="min-width:min(230px,100%);flex:1 1 230px;max-width:100%">${gymStates.map(([k, l]) => `<button class="${rec.gym === k ? 'on' : ''}" data-act="gym-day" data-v="${k}">${l}</button>`).join('')}</div></div>
+          <div class="seg-ctl gym-seg" style="min-width:min(230px,100%);flex:1 1 230px;max-width:100%">${gymStates.map(([k, l]) => `<button class="${rec.gym === k ? 'on' : ''}" data-act="gym-day" data-v="${k}" aria-pressed="${rec.gym === k}">${l}</button>`).join('')}</div></div>
         <div class="kv"><span>${icon('walk', 18)}Actividad</span><button class="weight-btn" data-act="activity-add">${en.items.length ? `${fmt(en.items.reduce((x, a) => x + a.kcal, 0))} kcal` : 'Agregar'}</button></div>
         ${d === today ? sleepCard() : ''}
         <div class="kv"><span>${icon('scale', 18)}Peso en ayunas</span><button class="weight-btn" data-act="weight">${w && w.weight ? `${fmt(w.weight, 1)} kg` : 'Registrar'}</button></div>
@@ -376,27 +377,43 @@ document.addEventListener('click', (e) => {
   if (fn) { e.preventDefault(); fn(el, e); }
 });
 
-// deslizar la semana
-(function weekSwipe() {
-  let x0 = null; let y0 = null; let target = null;
-  document.addEventListener('pointerdown', (e) => { const w = e.target.closest('[data-swipe="week"]'); if (!w) return; x0 = e.clientX; y0 = e.clientY; target = w; }, { passive: true });
-  document.addEventListener('pointerup', (e) => {
-    if (x0 == null || !target) return;
-    const dx = e.clientX - x0; const dy = e.clientY - y0;
-    x0 = null; target = null;
-    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-      const nd = addDays(ui.date, dx < 0 ? 7 : -7);
-      setDate(nd > todayISO() ? todayISO() : nd);
-    }
-  }, { passive: true });
-})();
+// deslizar la semana (con animación: ui.js) y deslizar entre pestañas
+swipes.week = (dir) => {
+  let nd = addDays(ui.date, 7 * dir);
+  if (nd > todayISO()) nd = todayISO();
+  if (nd === ui.date) return false;
+  setDate(nd); return true;
+};
+swipes.$tab = (dir) => {
+  const order = [...document.querySelectorAll('.tabbar .tab[data-tab]')].map((b) => b.dataset.tab);
+  const i = order.indexOf(ui.tab);
+  const next = order[i + dir];
+  if (i < 0 || !next) return false;
+  go(next); return true;
+};
 
 // ---------------------------------------------------------------------------
 // Registrar (texto, voz, foto, código) → IA → revisión
 // ---------------------------------------------------------------------------
+// Lo que se estaba escribiendo si se cerró Registrar sin analizar: vuelve al abrirlo de nuevo.
+// Solo en memoria: al recargar la página se pierde.
+let loggerDraft = null;
+
 export function openLogger({ date = ui.date, moment = null, text = '', autoMic = false, image = null } = {}) {
-  const st = { date, moment: moment || (date === todayISO() ? store.momentForTime() : 'almuerzo'), text, image, audio: null, dict: null, rec: null, busy: false, draft: null, abort: false };
-  const s = openSheet({ title: 'Registrar', full: true, body: '<div class="logger"></div>', footer: '', onClose: () => { stopVoice(st); if (st.busy) toBackground(st); else st.abort = true; } });
+  const st = { date, moment: moment || (date === todayISO() ? store.momentForTime() : 'almuerzo'), text, image, audio: null, dict: null, rec: null, busy: false, draft: null, abort: false, used: false };
+  const D = loggerDraft;
+  if (D && !text && !image) {
+    st.text = D.text; st.image = D.image; st.audio = D.audio;
+    if (!moment) { st.date = D.date; st.moment = D.moment; }
+  }
+  loggerDraft = null;
+  const nEntries = store.S().entries.length;
+  const s = openSheet({ title: 'Registrar', full: true, body: '<div class="logger"></div>', footer: '', onClose: () => {
+    stopVoice(st);
+    if (st.busy) toBackground(st); else st.abort = true;
+    const used = st.used || st.busy || st.draft || store.S().entries.length !== nEntries;
+    if (!used && ((st.text || '').trim() || st.image || st.audio)) loggerDraft = { text: st.text, image: st.image, audio: st.audio, date: st.date, moment: st.moment };
+  } });
   st.sheet = s;
   renderComposer(st);
   if (autoMic) setTimeout(() => toggleDictation(st), 350);
@@ -568,6 +585,7 @@ function addSingle(date, moment, item, opts = {}) {
 
 function savePending(st) {
   if (!st.text.trim()) { toast('Escribí o dictá qué comiste.'); return; }
+  st.used = true;
   store.S().pending.push({ id: uid('p'), text: st.text.trim(), date: st.date, moment: st.moment, at: Date.now() });
   store.commit('pending');
   st.sheet.close();
@@ -588,6 +606,7 @@ async function runAnalysis(st, { forceAI = false } = {}) {
   stopVoice(st);
   const text = (st.text || '').trim();
   if (!text && !st.image && !st.audio) { toast('Escribí, dictá o adjuntá algo para analizar.'); return; }
+  st.used = true;
   // IA propia primero: si entiende todo el mensaje, se resuelve al instante y sin gastar consultas
   const ai = store.S().settings.ai;
   if (!forceAI && text && !st.image && !st.audio && ai.localFirst !== false) {
@@ -687,6 +706,7 @@ function runOffline(st) {
   stopVoice(st);
   const text = (st.text || '').trim();
   if (!text) { toast('Escribí qué comiste para calcularlo con tu biblioteca.'); return; }
+  st.used = true;
   const ctx = AI.buildContext({ baseDate: st.date, baseMoment: st.moment });
   const draft = AI.analyzeOffline(text, ctx);
   showReview(st, draft);
@@ -725,7 +745,7 @@ function showReview(st, draft) {
   });
   if (!draft.groups.length) groupsHtml = `<div class="empty" style="margin-top:6px"><strong>Sin alimentos</strong>${draft.water.length || draft.habits.length || draft.gym.length || draft.weight.length || draft.study?.length || draft.activity?.length || draft.sleep?.length ? 'Solo se registran los datos de abajo.' : 'No encontré comidas en el mensaje.'}</div>`;
   const extras = [];
-  draft.water.forEach((w, i) => extras.push(`<span class="rv-extra">${icon('drop', 16)}${w.mode === 'fijar' ? 'Agua total' : '+'}${fmt(w.ml)} ml · ${esc(relativeDayLabel(w.date, today).toLowerCase())}<button data-r="rm" data-k="water" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
+  draft.water.forEach((w, i) => extras.push(`<span class="rv-extra">${icon('drop', 16)}${w.mode === 'fijar' ? 'Agua total' : '+'}${fmt(w.ml)} ml${w.src ? ` de agua (${esc(w.src)})` : ''} · ${esc(relativeDayLabel(w.date, today).toLowerCase())}<button data-r="rm" data-k="water" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   draft.habits.forEach((h, i) => extras.push(`<span class="rv-extra">${icon(h.done ? 'check' : 'x', 16)}${esc(h.name)}${h.id ? '' : ' (nuevo)'} · ${esc(relativeDayLabel(h.date, today).toLowerCase())}<button data-r="rm" data-k="habits" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   draft.gym.forEach((g, i) => extras.push(`<span class="rv-extra">${icon('dumbbell', 16)}Gym: ${g.status === 'fui' ? 'fui' : g.status === 'no_fui' ? 'no fui' : 'descanso'}${g.detail ? ` (${esc(g.detail)})` : ''} · ${esc(relativeDayLabel(g.date, today).toLowerCase())}<button data-r="rm" data-k="gym" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));
   (draft.activity || []).forEach((a, i) => extras.push(`<span class="rv-extra">${icon('walk', 16)}${esc(EN.describeAct(a))} · ${esc(relativeDayLabel(a.date, today).toLowerCase())}<button data-r="rm" data-k="activity" data-i="${i}" aria-label="Quitar">${icon('x', 14)}</button></span>`));

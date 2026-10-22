@@ -29,7 +29,7 @@ export function weekStats(from) {
     const late = store.entriesOn(d).filter((e) => e.moment === 'post_cena').reduce((x, e) => x + store.entryMacros(e).kcal, 0);
     return { d, ...t, water: rec.water || 0, gym: rec.gym || '', study: rec.study || 0, late, bal: t.items ? EN.dayEnergy(d).balance : null };
   });
-  const L = rows.filter((r) => r.items);
+  const L = rows.filter((r) => r.items && store.dayComplete(r.d)); // hoy no cuenta hasta que termine
   const avg = (k, arr = L) => (arr.length ? arr.reduce((x, r) => x + (r[k] || 0), 0) / arr.length : 0);
   const inKcal = (r) => (cut ? r.kcal <= g.kcal * 1.05 && r.kcal >= g.kcal * 0.8 : r.kcal >= g.kcal * 0.93 && r.kcal <= g.kcal * 1.15);
   const ws = store.weightTrend().filter((x) => x.date >= from && x.date <= to);

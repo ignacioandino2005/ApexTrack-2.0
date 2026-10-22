@@ -42,6 +42,7 @@ export const SYSTEM_PROMPT = `Sos el motor de registro nutricional de ApexTrack,
 - Sueño ("dormí 6 horas", "me acosté a la 1 y me levanté a las 8, dormí mal") → sleep con date (el día en que se despertó), hours, bed y wake en HH:MM si los dice, y quality de 1 a 5 si opina cómo durmió (muy mal 1, mal 2, normal 3, bien 4, excelente 5).
 - Actividad física fuera de la rutina de gimnasio ("caminé 40 minutos", "hice 8000 pasos", "corrí 5 km", "jugué al fútbol una hora") → activity con type (caminata, caminata_rapida, correr, bici, natacion, futbol, tenis, baile, eliptico, yoga, pesas, otro) y lo que se dijo: minutes, km o steps.
 - Café, té y mate van en items aunque casi no tengan calorías; sumá azúcar o leche solo si se mencionan.
+- Mate, tereré, té, café, gaseosas, jugos y aguas saborizadas: en items con su volumen en ml (unit "ml" o vaso/taza/termo, grams = ml). La app los suma sola al agua del día: NO los repitas en water. Mate cebado: un termo ≈ 1000 ml, "unos mates" ≈ 500 ml.
 
 3) CADA ALIMENTO
 - said: las palabras del mensaje que nombran este alimento y su cantidad, copiadas tal cual y sin muletillas ("dos milanesas de pollo al horno").
@@ -730,6 +731,15 @@ const pick = (o, ...keys) => { for (const k of keys) if (o && o[k] !== undefined
 
 const ALCOHOL_RE = /\b(vino|cerveza|birra|fernet|vodka|whisky|whiskey|ron|gin|licor|sidra|champagne|champan|espumante|aperitivo|trago|campari|gancia|tequila|daiquiri|mojito|caipirinha|cuba libre|destornillador)\b/;
 const DRINK_RE = /\b(bebida|jugo|leche|gaseosa|agua|cafe|te|mate cocido|vino|cerveza|licuado|batido|soda|infusion|cola|coca|sprite|fanta|gatorade|powerade|yogur bebible|chocolatada|fernet|trago|sidra)\b/;
+// Bebidas que también suman al agua del día (sin alcohol ni lácteos espesos)
+const HYDRO_RE = /\b(mate|mates|terere|te|cafe|gaseosa|soda|jugo|agua|aguas|infusion|cola|coca|sprite|fanta|seven up|7up|pomelo|tonica|gatorade|powerade|aquarius|levite|limonada|isotonica|cocido)\b/;
+const NOT_HYDRO_RE = /^(leche|yogur)|licuado|batido|chocolatada|smoothie|caldo|sopa|polvo|helado|dulce de/;
+export function hydrationMl(name, it) {
+  const n = norm(name || '');
+  if (!it?.liq || !HYDRO_RE.test(n) || NOT_HYDRO_RE.test(n) || ALCOHOL_RE.test(n)) return 0;
+  const ml = Number(it.grams);
+  return ml >= 30 ? Math.min(2000, Math.round(ml)) : 0;
+}
 const DRINK_UNITS = new Set(['ml', 'vaso', 'taza', 'botella', 'copa', 'lata']);
 function isLiquid(name, unit) {
   const n = norm(name);
@@ -824,17 +834,22 @@ export function normalizeDraft(raw0, ctx, meta = {}) {
     const item = normalizeItem(r, ctx, warnings);
     if (!item) continue;
     groupFor(fixDate(r.date), fixMoment(r.moment)).items.push(item);
+    // mate, gaseosa, té, jugo… también cuentan como agua
+    const hml = hydrationMl(r.name, item);
+    if (hml) extraWater.push({ date: r.date, ml: hml, mode: 'sumar', src: item.name.split(' (')[0] });
   }
   if (extraWater.length) raw = { ...raw, water: [...(raw.water || []), ...extraWater] };
   if (extraHabits.length) raw = { ...raw, habits: [...(raw.habits || []), ...extraHabits] };
   groups.sort((a, b) => a.date.localeCompare(b.date) || store.momentIndex(a.moment) - store.momentIndex(b.moment));
 
   const water = [];
+  const fixedDays = new Set((Array.isArray(raw?.water) ? raw.water : []).filter((w) => w.mode === 'fijar').map((w) => fixDate(w.date)));
   for (const w of Array.isArray(raw?.water) ? raw.water : []) {
     let ml = num(w.ml);
     if (!(ml > 0)) continue;
+    if (w.src && fixedDays.has(fixDate(w.date))) continue; // ya dio el total del día
     if (ml > 8000) { warnings.push(`Agua: ${ml} ml parece un error, lo limité a 4000 ml.`); ml = 4000; }
-    water.push({ date: fixDate(w.date), ml: round0(ml), mode: w.mode === 'fijar' ? 'fijar' : 'sumar' });
+    water.push({ date: fixDate(w.date), ml: round0(ml), mode: w.mode === 'fijar' ? 'fijar' : 'sumar', ...(w.src ? { src: String(w.src) } : {}) });
   }
   const habits = [];
   for (const h of Array.isArray(raw?.habits) ? raw.habits : []) {
@@ -1481,7 +1496,7 @@ export const TEST_CASES = [
         { day: 0, moment: 'media_tarde', kcal: [60, 180] },
         { day: 0, moment: 'merienda', kcal: [550, 900] },
       ],
-      water: [{ day: -1, ml: 750 }, { day: 0, ml: 500 }], gym: [{ day: -1, status: 'no_fui' }], noGroup: [{ day: 0, moment: 'desayuno' }],
+      water: [{ day: -1, ml: 750 }, { day: 0, ml: 650 }], gym: [{ day: -1, status: 'no_fui' }], noGroup: [{ day: 0, moment: 'desayuno' }],
       itemCheck: [{ day: 0, moment: 'merienda', name: /queso/, grams: [65, 75] }, { day: -1, moment: 'cena', name: /pan/, grams: [65, 75] }],
     },
   },

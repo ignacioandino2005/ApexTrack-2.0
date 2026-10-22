@@ -442,6 +442,8 @@ ok('En déficit, pasarse se marca en rojo', await page.locator('.hero.excess').c
 // análisis del progreso
 await tap('.tab[data-tab="progreso"]');
 await clearStamps();
+// el día en curso no cuenta: se agrega otro día completo para tener 2
+await val(() => { const s = window.__apex.store; const d = new Date(Date.now() - 3 * 86400000).toLocaleDateString('sv-SE'); s.addItems(d, 'almuerzo', [{ id: 'ix', name: 'Arroz con pollo', qty: 1, unit: 'porcion', grams: 400, per100: { kcal: 150, p: 12, c: 18, f: 3 }, basis: 'tabla' }]); s.commit('x'); });
 await tap('[data-act="insight-run"]');
 await sheetTop().locator('.opt[data-v="mes"]').click();
 await page.waitForSelector('.ins-score', { timeout: 15000 }).catch(() => {});

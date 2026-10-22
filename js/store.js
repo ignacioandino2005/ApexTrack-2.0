@@ -4,7 +4,7 @@ import { todayISO, uid, addDays, dateRange, weekStart, round1, round0, deepClone
 import { setCustomFoods, calc, getFood, foodUnits, unitLabel, canonUnit, sanitizePer100 } from './foods.js';
 import { defaultReminders } from './reminders-core.js';
 
-export const APP_VERSION = '2.8.1';
+export const APP_VERSION = '2.2.1';
 const SCHEMA = 1;
 const DB_NAME = 'apextrack';
 const DB_STORE = 'kv';
@@ -467,6 +467,14 @@ export function upsertBody(date, fields) {
   state.data.body.sort((a, c) => a.date.localeCompare(c.date));
   return b;
 }
+/** Borra el pesaje de un día (si el registro no tiene medidas, se va entero). */
+export function deleteWeight(date) {
+  const b = bodyOn(date);
+  if (!b) return;
+  delete b.weight;
+  const keep = Object.keys(b).some((k) => !['id', 'date', 'note'].includes(k));
+  if (!keep) state.data.body = state.data.body.filter((x) => x !== b);
+}
 export function weightSeries() {
   return state.data.body.filter((b) => Number.isFinite(b.weight)).map((b) => ({ date: b.date, kg: b.weight })).sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -509,8 +517,23 @@ export function streak(today = todayISO()) {
   while (set.has(d)) { n++; d = addDays(d, -1); }
   return n;
 }
+/**
+ * ¿El día ya terminó para las estadísticas? Los días pasados sí. Hoy solo si es tarde (después de las 22)
+ * y ya registraste la cena (o algo después): si no, hoy bajaría los promedios.
+ */
+export function dayComplete(date, now = new Date()) {
+  const today = todayISO();
+  if (date < today) return true;
+  if (date > today) return false;
+  if (now.getHours() < 22) return false;
+  const idx = momentIndex('cena');
+  return entriesOn(date).some((e) => momentIndex(e.moment) >= (idx === 99 ? 6 : idx));
+}
+/** Días para promediar: con registros y ya terminados. */
+export const statDays = (dates) => dates.filter((d) => entriesOn(d).length && dayComplete(d));
+
 export function averages(days = 7, upTo = todayISO()) {
-  const dates = dateRange(addDays(upTo, -(days - 1)), upTo).filter((d) => entriesOn(d).length);
+  const dates = statDays(dateRange(addDays(upTo, -(days - 1)), upTo));
   if (!dates.length) return null;
   const tot = dates.map((d) => ({ ...dayTotals(d), water: day(d).water || 0 }));
   const avg = {};
